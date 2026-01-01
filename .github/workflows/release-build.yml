@@ -1,5 +1,8 @@
 name: Release Firmware Build and Publish
 
+permissions:
+  contents: write
+
 on:
   release:
     types: [published]
