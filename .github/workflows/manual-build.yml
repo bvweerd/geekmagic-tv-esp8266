@@ -1,0 +1,47 @@
+name: Manual Firmware Build
+
+on:
+  workflow_dispatch:
+    inputs:
+      debug_build:
+        description: "Build with debug optimizations?"
+        required: false
+        type: boolean
+        default: false
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.x"
+
+      - name: Install PlatformIO
+        run: |
+          python -m pip install --upgrade pip
+          pip install --upgrade platformio
+
+      - name: Build Firmware
+        run: |
+          if [ "${{ github.event.inputs.debug_build }}" = "true" ]; then
+            echo "⚙ Debug build"
+            pio run -e nodemcuv2_debug
+          else
+            echo "🚀 Release build"
+            pio run -e nodemcuv2
+          fi
+
+      - name: Upload firmware.bin artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: smartclock-firmware
+          path: |
+            .pio/build/nodemcuv2/firmware.bin
+            .pio/build/nodemcuv2_debug/firmware.bin
+          retention-days: 7

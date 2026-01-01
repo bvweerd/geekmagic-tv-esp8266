@@ -1,0 +1,43 @@
+name: Release Firmware Build and Publish
+
+on:
+  release:
+    types: [published]
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.x"
+
+      - name: Install PlatformIO
+        run: |
+          python -m pip install --upgrade pip
+          pip install --upgrade platformio
+
+      - name: Build Firmware
+        run: pio run -e nodemcuv2
+
+      - name: Get Release Tag
+        id: get_release_tag
+        run: echo "TAG=${{ github.ref_name }}" >> $GITHUB_OUTPUT
+
+      - name: Upload firmware.bin to GitHub Release
+        uses: softprops/action-gh-release@v1
+        with:
+          files: .pio/build/nodemcuv2/firmware.bin
+          tag_name: ${{ steps.get_release_tag.outputs.TAG }}
+          name: Firmware ${{ steps.get_release_tag.outputs.TAG }}
+          body: |
+            Firmware binary for release ${{ steps.get_release_tag.outputs.TAG }}
+          draft: false
+          prerelease: false
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
