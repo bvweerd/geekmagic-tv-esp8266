@@ -1,4 +1,4 @@
-# SmartClock Arduino
+# GeekMagic SmallTV Smart Weather Clock custom firmware
 
 ESP8266 SmartClock with GeekMagic API compatibility. Works with: https://github.com/adrienbrault/geekmagic-hacs
 
