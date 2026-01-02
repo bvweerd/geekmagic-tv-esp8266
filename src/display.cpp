@@ -124,6 +124,9 @@ void displayInit() {
     displayState.ipInfo = ""; // Initialize IP info as empty
     displayState.showImage = false;
     displayState.imagePath = "";
+    displayState.apMode = false;
+    displayState.apSSID = "";
+    displayState.apPassword = "";
 
     // Backlight on (inverted PWM: low value = bright)
     pinMode(PIN_BACKLIGHT, OUTPUT);
@@ -170,6 +173,9 @@ void displayUpdate() {
     if (displayState.showImage && !displayState.imagePath.isEmpty()) {
         logPrint("Rendering image: " + displayState.imagePath);
         displayRenderImage(displayState.imagePath);
+    } else if (displayState.apMode) {
+        logPrint("Rendering AP mode screen");
+        displayRenderAPMode();
     } else {
         logPrint("Rendering clock");
         displayRenderClock();
@@ -257,6 +263,86 @@ void displayRenderClock() {
     }
 
     logPrint("displayRenderClock DONE (Simplified)");
+}
+
+void displayRenderAPMode() {
+    logPrint("displayRenderAPMode START");
+
+    tft.fillScreen(TFT_BLACK);
+
+    int currentY = 5; // Start from top with small margin
+
+    // Display IP Info at the top (small font)
+    if (!displayState.ipInfo.isEmpty()) {
+        tft.setTextColor(TFT_DARKGREY, TFT_BLACK);
+        tft.setTextDatum(TC_DATUM);
+        int ipFont = 1; // Small font
+        tft.setTextFont(ipFont);
+        int ipLineHeight = tft.fontHeight();
+        std::vector<String> ipWrappedLines = wrapText(displayState.ipInfo, ipFont, tft.width() - 10);
+
+        for (int i = 0; i < ipWrappedLines.size(); i++) {
+            tft.drawString(ipWrappedLines[i], tft.width() / 2, currentY + (i * ipLineHeight), ipFont);
+        }
+        currentY += ipWrappedLines.size() * ipLineHeight + 20; // Add spacing after IP
+    }
+
+    // Calculate remaining vertical space
+    int remainingHeight = tft.height() - currentY;
+
+    // Display "AP Mode" header
+    tft.setTextColor(TFT_CYAN, TFT_BLACK);
+    tft.setTextDatum(TC_DATUM);
+    int headerFont = 4;
+    tft.setTextFont(headerFont);
+    int headerHeight = tft.fontHeight();
+
+    // Display SSID label and value
+    int labelFont = 2;
+    int valueFont = 4;
+    tft.setTextFont(labelFont);
+    int labelHeight = tft.fontHeight();
+    tft.setTextFont(valueFont);
+    int valueHeight = tft.fontHeight();
+
+    // Calculate total content height
+    int totalContentHeight = headerHeight + 10 + // "AP Mode" + spacing
+                            labelHeight + valueHeight + 10 + // SSID section + spacing
+                            labelHeight + valueHeight;        // Password section
+
+    // Center content vertically in remaining space
+    int contentStartY = currentY + (remainingHeight - totalContentHeight) / 2;
+
+    // Draw "AP Mode" header
+    tft.setTextFont(headerFont);
+    tft.setTextColor(TFT_CYAN, TFT_BLACK);
+    tft.drawString("AP Mode", tft.width() / 2, contentStartY, headerFont);
+    contentStartY += headerHeight + 10;
+
+    // Draw SSID label
+    tft.setTextFont(labelFont);
+    tft.setTextColor(TFT_DARKGREY, TFT_BLACK);
+    tft.drawString("SSID:", tft.width() / 2, contentStartY, labelFont);
+    contentStartY += labelHeight;
+
+    // Draw SSID value
+    tft.setTextFont(valueFont);
+    tft.setTextColor(TFT_WHITE, TFT_BLACK);
+    tft.drawString(displayState.apSSID, tft.width() / 2, contentStartY, valueFont);
+    contentStartY += valueHeight + 10;
+
+    // Draw Password label
+    tft.setTextFont(labelFont);
+    tft.setTextColor(TFT_DARKGREY, TFT_BLACK);
+    tft.drawString("Password:", tft.width() / 2, contentStartY, labelFont);
+    contentStartY += labelHeight;
+
+    // Draw Password value
+    tft.setTextFont(valueFont);
+    tft.setTextColor(TFT_WHITE, TFT_BLACK);
+    tft.drawString(displayState.apPassword, tft.width() / 2, contentStartY, valueFont);
+
+    logPrint("displayRenderAPMode DONE");
 }
 
 void displayRenderImage(const String &path) {

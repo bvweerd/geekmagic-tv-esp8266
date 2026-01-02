@@ -6,6 +6,9 @@
 #define BOOT_COUNTER_MAGIC 0xB007
 #define BOOT_COUNTER_ADDR (SETTINGS_ADDR + sizeof(uint16_t) + sizeof(Settings))
 #define BOOT_FAILURE_THRESHOLD 5  // Reset EEPROM after 5 consecutive boot failures
+#define POWER_CYCLE_COUNTER_MAGIC 0x5C01  // 5C = "Power Cycle"
+#define POWER_CYCLE_COUNTER_ADDR (BOOT_COUNTER_ADDR + sizeof(BootCounter))
+#define POWER_CYCLE_THRESHOLD 5  // Factory reset after 5 quick power cycles
 
 // CRC32 lookup table for fast calculation
 static const uint32_t crc32_table[16] = {
@@ -173,6 +176,69 @@ bool bootCounterCheckFailsafe() {
 
     if (failCount >= BOOT_FAILURE_THRESHOLD) {
         Serial.printf("FAILSAFE: Boot failure threshold reached (%d failures)\n", failCount);
+        return true;
+    }
+
+    return false;
+}
+
+// Power cycle counter functions for user-initiated factory reset
+void powerCycleCounterInit() {
+    // Increment the power cycle counter
+    powerCycleCounterIncrement();
+}
+
+uint8_t powerCycleCounterGet() {
+    PowerCycleCounter counter;
+    uint16_t magic;
+
+    EEPROM.get(POWER_CYCLE_COUNTER_ADDR, magic);
+
+    if (magic == POWER_CYCLE_COUNTER_MAGIC) {
+        EEPROM.get(POWER_CYCLE_COUNTER_ADDR, counter);
+        return counter.cycleCount;
+    }
+
+    return 0;
+}
+
+void powerCycleCounterIncrement() {
+    PowerCycleCounter counter;
+    uint16_t magic;
+
+    EEPROM.get(POWER_CYCLE_COUNTER_ADDR, magic);
+
+    if (magic == POWER_CYCLE_COUNTER_MAGIC) {
+        EEPROM.get(POWER_CYCLE_COUNTER_ADDR, counter);
+        counter.cycleCount++;
+    } else {
+        // Initialize power cycle counter
+        counter.magic = POWER_CYCLE_COUNTER_MAGIC;
+        counter.cycleCount = 1;
+    }
+
+    EEPROM.put(POWER_CYCLE_COUNTER_ADDR, counter);
+    EEPROM.commit();
+
+    Serial.printf("Power cycle count: %d/%d\n", counter.cycleCount, POWER_CYCLE_THRESHOLD);
+}
+
+void powerCycleCounterReset() {
+    PowerCycleCounter counter;
+    counter.magic = POWER_CYCLE_COUNTER_MAGIC;
+    counter.cycleCount = 0;
+
+    EEPROM.put(POWER_CYCLE_COUNTER_ADDR, counter);
+    EEPROM.commit();
+
+    Serial.println("Power cycle counter reset");
+}
+
+bool powerCycleCounterCheckReset() {
+    uint8_t cycleCount = powerCycleCounterGet();
+
+    if (cycleCount >= POWER_CYCLE_THRESHOLD) {
+        Serial.printf("USER RESET: Power cycle threshold reached (%d cycles)\n", cycleCount);
         return true;
     }
 

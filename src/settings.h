@@ -24,6 +24,12 @@ struct BootCounter {
     uint32_t lastBootTime;     // Timestamp of last successful boot
 };
 
+// Power cycle reset structure (user-initiated factory reset)
+struct PowerCycleCounter {
+    uint16_t magic;            // Magic number to validate power cycle counter (0x5C01)
+    uint8_t cycleCount;        // Number of quick power cycles
+};
+
 void settingsInit();
 void settingsLoad(Settings &settings);
 void settingsSave(const Settings &settings);
@@ -37,5 +43,12 @@ uint8_t bootCounterGet();
 void bootCounterIncrement();
 void bootCounterReset();
 bool bootCounterCheckFailsafe();
+
+// Power cycle counter functions (user-initiated factory reset)
+void powerCycleCounterInit();
+uint8_t powerCycleCounterGet();
+void powerCycleCounterIncrement();
+void powerCycleCounterReset();
+bool powerCycleCounterCheckReset();
 
 #endif

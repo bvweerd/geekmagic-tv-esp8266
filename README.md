@@ -4,13 +4,7 @@ ESP8266 SmartClock with GeekMagic API compatibility.
 
 ## ⚠️ OTA Update Safety
 
-This firmware implements **robust OTA update protection** with multiple failsafe mechanisms:
-- ✅ Automatic EEPROM validation with CRC32 checksums
-- ✅ Boot failure detection and automatic recovery
-- ✅ WiFi connection retry with exponential backoff
-- ✅ Automatic fallback to AP mode when WiFi fails
-- ✅ Emergency EEPROM reset after repeated boot failures
-
+This firmware implements **robust OTA update protection** with multiple failsafe mechanisms.
 **While OTA updates are now significantly safer, always keep a USB cable available for emergency recovery via UART if needed.**
 
 ## Features
@@ -55,6 +49,45 @@ The firmware tracks consecutive boot failures to detect crash loops:
 
 This prevents infinite crash loops after problematic OTA updates.
 
+### User-Initiated Factory Reset (Power Cycle Method)
+
+The firmware provides a **manual factory reset mechanism** that users can trigger without needing the web interface or serial console:
+
+**How it works:**
+1. Power cycle the device **5 times in quick succession** (within ~10 seconds total)
+2. On the 5th boot, the device automatically performs a complete factory reset
+3. All settings, WiFi credentials, and filesystem data are erased
+4. Device restarts in AP mode ready for initial setup
+
+**Reset Process:**
+- **Power Cycle Counter**: Tracked in EEPROM, increments on each boot
+- **Timeout Window**: Counter resets to 0 after 10 seconds of successful uptime
+- **Factory Reset Trigger**: When counter reaches 5, performs full factory reset
+- **Reset Actions**: Erases WiFi config, resets EEPROM settings, formats filesystem, restarts device
+
+**When to use this:**
+- Device is stuck in a boot loop and web interface is inaccessible
+- Forgot WiFi credentials and can't access AP mode
+- Need to completely reset device to factory defaults
+- Preparing device for a new owner or network
+
+**Usage Example:**
+1. Unplug device from power
+2. Wait 2 seconds
+3. Plug in device, wait for it to start booting (3-5 seconds)
+4. Unplug device again
+5. Repeat steps 2-4 until you've done this 5 times total
+6. On the 5th boot, device will display "Factory Reset" message and restart in AP mode
+
+**Serial Console Output:**
+```
+========================================
+USER RESET: 5 quick power cycles detected!
+Performing factory reset...
+========================================
+Factory reset complete. System will restart in 5 seconds...
+```
+
 ### WiFi Connection Resilience
 
 Enhanced WiFi connection handling with multiple fallback levels:
@@ -75,7 +108,7 @@ If all connection attempts fail:
 When in failsafe mode:
 - Device runs as Access Point (SSID: `SmartClock-Setup`)
 - **AP credentials displayed on device screen** (SSID, password, and IP address)
-- Random password generated for security (12-character alphanumeric)
+- Random password generated for security (8-digit numeric)
 - Web interface remains accessible via AP IP (typically 192.168.4.1)
 - Retries WiFi connection every 5 minutes automatically
 - If connection succeeds: restarts to restore full functionality
@@ -89,7 +122,7 @@ During normal operation:
 
 ### Configuration
 
-Key settings in `src/config.h`:
+Key settings in `src/config.h` and `src/settings.cpp`:
 ```cpp
 #define WIFI_RETRY_ATTEMPTS 5          // Initial connection attempts
 #define WIFI_RETRY_DELAY_MS 2000        // Base delay for exponential backoff
@@ -97,6 +130,7 @@ Key settings in `src/config.h`:
 #define WIFI_MONITOR_INTERVAL 60000     // Check WiFi every 60s
 #define WIFI_RECONNECT_INTERVAL 300000  // Retry in AP mode every 5min
 #define BOOT_FAILURE_THRESHOLD 5        // Emergency reset after 5 failures
+#define POWER_CYCLE_THRESHOLD 5         // Factory reset after 5 quick power cycles
 #define FIRMWARE_VERSION 2              // Increment when Settings struct changes
 ```
 
@@ -116,6 +150,8 @@ Key settings in `src/config.h`:
 | Invalid firmware version | ✅ Automatic reset to defaults | Not needed |
 | WiFi network unavailable | ✅ Fallback to AP mode, periodic retry | Connect to AP and reconfigure |
 | 5+ consecutive boot failures | ✅ Emergency EEPROM reset + restart | Not needed |
+| Need factory reset | ❌ Not automatic | **✅ 5 quick power cycles** |
+| Forgot WiFi credentials | ✅ Fallback to AP mode | **✅ 5 quick power cycles** or connect to AP |
 | Complete crash/brick | ❌ Not possible | Flash via USB/UART |
 
 ## Hardware
@@ -228,7 +264,7 @@ Stored in EEPROM:
 When the device is in AP/failsafe mode, the display automatically shows:
 - **"AP Mode Active"** message
 - **SSID**: The access point name (SmartClock-Setup)
-- **Password**: The randomly generated 12-character password
+- **Password**: The randomly generated 8-digit password
 - **IP Address**: The AP IP address (typically 192.168.4.1) shown at top
 
 This ensures you can always see the connection credentials on the device screen without needing serial access.
@@ -240,11 +276,11 @@ This ensures you can always see the connection credentials on the device screen 
 ## Security Features
 
 ### Random AP Password Generation
-For enhanced security, the device generates a **unique random 12-character alphanumeric password** on each boot when AP mode is activated. This prevents unauthorized access to your device's configuration portal.
+For enhanced security, the device generates a **unique random 8-digit numeric password** on each boot when AP mode is activated. This prevents unauthorized access to your device's configuration portal.
 
 **Password Characteristics:**
-- Length: 12 characters
-- Character set: a-z, A-Z, 0-9
+- Length: 8 digits
+- Character set: 0-9 (numbers only)
 - Generated using hardware random number generator (ESP.getCycleCount() ^ micros() ^ ESP.getChipId())
 - Displayed on device screen in AP mode
 - Logged to serial console at boot
@@ -283,6 +319,13 @@ For enhanced security, the device generates a **unique random 12-character alpha
 ### Time or Date is incorrect
 - Ensure the device is connected to WiFi.
 - Check the GMT Offset setting in the Web Control Panel.
+
+### Device is stuck or needs factory reset
+- **Quick Solution**: Power cycle the device **5 times in quick succession** (within ~10 seconds total)
+- On the 5th boot, the device will automatically perform a complete factory reset
+- This will erase all settings, WiFi credentials, and filesystem data
+- Device will restart in AP mode ready for initial setup
+- See "User-Initiated Factory Reset (Power Cycle Method)" section for detailed instructions
 
 ## Development
 
@@ -324,7 +367,7 @@ pio run -t uploadfs
 ## Credentials
 
 - **WiFi AP SSID**: SmartClock-Setup
-- **WiFi AP Password**: Random 12-character alphanumeric (see device display or serial console)
+- **WiFi AP Password**: Random 8-digit numeric (see device display or serial console)
 - **OTA Password**: admin
 - **mDNS Hostname**: smartclock.local
 

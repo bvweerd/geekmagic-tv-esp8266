@@ -25,10 +25,11 @@ unsigned long lastWiFiCheck = 0;
 unsigned long lastWiFiReconnectAttempt = 0;
 bool wifiFailsafeMode = false;  // True when in AP-only mode after connection failures
 String apPassword = "";  // Generated random AP password
+bool powerCycleCounterCleared = false;  // Track if power cycle counter has been reset
 
-// Generate a random alphanumeric password
+// Generate a random numeric password (8 digits)
 String generateRandomPassword(int length) {
-    const char charset[] = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789";
+    const char charset[] = "0123456789";
     String password = "";
 
     // Seed random with hardware random number generator
@@ -81,32 +82,79 @@ bool tryConnectWiFi(int maxAttempts) {
 
 void setupWiFi() {
     displayShowMessage("WiFi Setup...");
+    Serial.println("=== WiFi Setup Start ===");
 
     // Generate random AP password if not already generated
     if (apPassword.isEmpty()) {
-        apPassword = generateRandomPassword(12);
+        apPassword = generateRandomPassword(8);
         Serial.printf("Generated AP Password: %s\n", apPassword.c_str());
     }
 
-    // First try to connect to saved WiFi credentials with retry
+    // Check if WiFi credentials are saved BEFORE attempting connection
+    String ssid = WiFi.SSID();
+    bool connected = false;  // Declare before goto to avoid compilation error
+
+    if (ssid.isEmpty() || ssid.length() == 0) {
+        Serial.println("No saved WiFi credentials - going directly to failsafe AP");
+        // Skip connection attempts and go directly to failsafe AP mode
+        goto failsafe_ap;
+    }
+
+    // Try to connect to saved WiFi credentials with retry
+    Serial.println("Attempting to connect with saved credentials...");
     if (tryConnectWiFi(WIFI_RETRY_ATTEMPTS)) {
         wifiFailsafeMode = false;
+        Serial.println("Connected successfully!");
         return;
     }
 
-    // If connection failed, start AP mode with WiFiManager
-    Serial.println("WiFi connection failed - starting AP mode");
+    // If connection failed, try WiFiManager config portal
+    Serial.println("WiFi connection failed - attempting WiFiManager config portal");
     displayShowMessage("WiFi Failed!\nStarting AP...");
-    delay(2000);
+    delay(1000);
 
+    // Set timeout - don't reset settings, let WiFiManager try saved credentials first
     wifiManager.setConfigPortalTimeout(WIFI_TIMEOUT);
+    Serial.printf("Starting WiFiManager autoConnect (timeout: %d seconds)...\n", WIFI_TIMEOUT);
+    displayShowMessage("Config Portal\nStarting...");
+    yield();
 
-    if (!wifiManager.autoConnect(WIFI_AP_NAME, apPassword.c_str())) {
-        // WiFiManager timeout - enter failsafe AP-only mode
-        Serial.println("WiFiManager timeout - entering failsafe AP mode");
+    // Try autoConnect with error handling
+    Serial.println("Calling wifiManager.autoConnect()...");
 
+    connected = wifiManager.autoConnect(WIFI_AP_NAME, apPassword.c_str());
+
+    yield();
+    Serial.printf("autoConnect returned: %s\n", connected ? "true" : "false");
+
+    if (!connected) {
+failsafe_ap:
+        // WiFiManager timeout or failure - enter failsafe AP-only mode
+        Serial.println("Entering failsafe AP mode");
+        displayShowMessage("Starting\nFailsafe AP...");
+        delay(1000);
+
+        // Ensure WiFi is in AP mode
+        WiFi.disconnect(true);
+        yield();
         WiFi.mode(WIFI_AP);
-        WiFi.softAP(WIFI_AP_NAME, apPassword.c_str());
+        yield();
+
+        Serial.printf("Attempting to start AP: SSID='%s', Password='%s'\n", WIFI_AP_NAME, apPassword.c_str());
+        bool apStarted = WiFi.softAP(WIFI_AP_NAME, apPassword.c_str());
+        Serial.printf("AP Start result: %s\n", apStarted ? "SUCCESS" : "FAILED");
+
+        if (!apStarted) {
+            // If AP failed to start, try one more time after delay
+            Serial.println("AP start failed, retrying after delay...");
+            delay(2000);
+            WiFi.mode(WIFI_OFF);
+            delay(500);
+            WiFi.mode(WIFI_AP);
+            delay(500);
+            apStarted = WiFi.softAP(WIFI_AP_NAME, apPassword.c_str());
+            Serial.printf("Retry AP Start result: %s\n", apStarted ? "SUCCESS" : "FAILED");
+        }
 
         wifiFailsafeMode = true;
 
@@ -115,28 +163,40 @@ void setupWiFi() {
         Serial.printf("  Password: %s\n", apPassword.c_str());
         Serial.printf("  IP: %s\n", WiFi.softAPIP().toString().c_str());
 
-        displayShowMessage("AP Mode\nSSID: " + String(WIFI_AP_NAME) + "\nPass: " + apPassword);
+        // Set AP mode display state
+        displayState.apMode = true;
+        displayState.apSSID = String(WIFI_AP_NAME);
+        displayState.apPassword = apPassword;
+        displayState.ipInfo = WiFi.softAPIP().toString();
+        displayUpdate();
         delay(5000);
     } else {
         wifiFailsafeMode = false;
+        Serial.println("WiFiManager connected successfully!");
         displayShowMessage("WiFi OK\n" + WiFi.localIP().toString());
         delay(2000);
     }
+
+    Serial.println("=== WiFi Setup Complete ===");
 }
 
 void monitorWiFi() {
-    // In failsafe mode, periodically try to reconnect to WiFi
+    // In failsafe mode, periodically try to reconnect to WiFi (only if credentials are saved)
     if (wifiFailsafeMode) {
-        if (millis() - lastWiFiReconnectAttempt > WIFI_RECONNECT_INTERVAL) {
-            Serial.println("Failsafe mode: attempting WiFi reconnection...");
-            lastWiFiReconnectAttempt = millis();
+        // Only attempt reconnection if WiFi credentials are actually saved
+        String ssid = WiFi.SSID();
+        if (!ssid.isEmpty() && ssid.length() > 0) {
+            if (millis() - lastWiFiReconnectAttempt > WIFI_RECONNECT_INTERVAL) {
+                Serial.println("Failsafe mode: attempting WiFi reconnection...");
+                lastWiFiReconnectAttempt = millis();
 
-            if (tryConnectWiFi(2)) {  // Quick 2 attempts
-                wifiFailsafeMode = false;
-                Serial.println("Reconnected! Exiting failsafe mode");
-                // Restart to reinitialize services properly
-                delay(1000);
-                ESP.restart();
+                if (tryConnectWiFi(2)) {  // Quick 2 attempts
+                    wifiFailsafeMode = false;
+                    Serial.println("Reconnected! Exiting failsafe mode");
+                    // Restart to reinitialize services properly
+                    delay(1000);
+                    ESP.restart();
+                }
             }
         }
         return;
@@ -161,7 +221,12 @@ void monitorWiFi() {
                 Serial.printf("  Password: %s\n", apPassword.c_str());
                 Serial.printf("  IP: %s\n", WiFi.softAPIP().toString().c_str());
 
-                displayShowMessage("WiFi Lost!\nAP Mode Active\nSSID: " + String(WIFI_AP_NAME) + "\nPass: " + apPassword);
+                // Set AP mode display state
+                displayState.apMode = true;
+                displayState.apSSID = String(WIFI_AP_NAME);
+                displayState.apPassword = apPassword;
+                displayState.ipInfo = WiFi.softAPIP().toString();
+                displayUpdate();
                 delay(3000);
             }
         }
@@ -265,6 +330,34 @@ void setup() {
     // Initialize EEPROM and boot counter
     settingsInit();
     bootCounterInit();  // Increment boot failure counter
+    powerCycleCounterInit();  // Increment power cycle counter
+
+    // Check for user-initiated factory reset (5 quick power cycles)
+    if (powerCycleCounterCheckReset()) {
+        Serial.println("========================================");
+        Serial.println("USER RESET: 5 quick power cycles detected!");
+        Serial.println("Performing factory reset...");
+        Serial.println("========================================");
+
+        // Factory reset sequence
+        WiFi.disconnect(true);
+        delay(100);
+
+        wifiManager.resetSettings();
+        delay(100);
+
+        ESP.eraseConfig();
+        delay(100);
+
+        settingsReset(appSettings);
+        settingsSave(appSettings);
+        bootCounterReset();
+        powerCycleCounterReset();
+
+        Serial.println("Factory reset complete. System will restart in 5 seconds...");
+        delay(5000);
+        ESP.restart();
+    }
 
     // Check for boot failure threshold
     if (bootCounterCheckFailsafe()) {
@@ -339,6 +432,14 @@ void setup() {
 }
 
 void loop() {
+    // Reset power cycle counter after 10 seconds of successful uptime
+    // This prevents accidental factory reset from normal reboots
+    if (!powerCycleCounterCleared && millis() > 10000) {
+        powerCycleCounterReset();
+        powerCycleCounterCleared = true;
+        Serial.println("Power cycle counter cleared after successful boot");
+    }
+
     // Monitor WiFi connection and handle failsafe mode
     monitorWiFi();
 
@@ -350,6 +451,7 @@ void loop() {
 
         // Only update time if not showing an image
         if (!displayState.showImage) {
+            displayState.apMode = false;  // Ensure AP mode is disabled in normal mode
             displayState.line1 = timeClient.getFormattedTime();
             displayState.ipInfo = WiFi.localIP().toString();  // Show IP address at top
             displayState.line2 = "";  // Clear custom message in normal mode
@@ -357,9 +459,10 @@ void loop() {
     } else {
         // In failsafe mode, show AP credentials on display
         if (!displayState.showImage) {
-            displayState.line1 = "AP Mode Active";
+            displayState.apMode = true;
+            displayState.apSSID = String(WIFI_AP_NAME);
+            displayState.apPassword = apPassword;
             displayState.ipInfo = WiFi.softAPIP().toString();  // Show AP IP at top
-            displayState.line2 = "SSID: " + String(WIFI_AP_NAME) + "\nPassword: " + apPassword;
         }
     }
 

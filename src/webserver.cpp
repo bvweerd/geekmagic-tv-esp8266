@@ -72,13 +72,28 @@ const char* index_html = R"rawliteral(
         </div>
 
         <div class="section">
+            <h2>WiFi Configuration</h2>
+            <button class="button" onclick="scanWiFi()">Scan Networks</button>
+            <div id="scanStatus" style="margin-top: 10px; font-style: italic;"></div>
+            <div class="input-group" id="wifiSection" style="display: none; margin-top: 15px;">
+                <label for="wifiNetwork">Select Network:</label>
+                <select id="wifiNetwork" style="width: 100%; padding: 10px; border: 1px solid #ccc; border-radius: 4px;">
+                    <option value="">-- Select a network --</option>
+                </select>
+                <label for="wifiPassword" style="margin-top: 10px;">Password:</label>
+                <input type="password" id="wifiPassword" placeholder="Enter WiFi password">
+                <button class="button" onclick="connectWiFi()" style="margin-top: 10px;">Connect</button>
+            </div>
+            <p style="margin-top: 15px;"><a href="#" class="button" onclick="reconfigureWiFi()">Reconfigure WiFi (Portal)</a></p>
+        </div>
+
+        <div class="section">
             <h2>Settings</h2>
             <div class="input-group">
                 <label for="brightness">Brightness (0-100):</label>
                 <input type="number" id="brightness" min="0" max="100" value="%BRIGHTNESS%">
                 <button class="button" onclick="setBrightness()">Set Brightness</button>
             </div>
-            <p><a href="#" class="button" onclick="reconfigureWiFi()">Reconfigure WiFi</a></p>
             <div class="input-group">
                 <label for="gmtOffset">GMT Offset (seconds):</label>
                 <input type="number" id="gmtOffset" value="%GMTOFFSET%">
@@ -103,6 +118,7 @@ const char* index_html = R"rawliteral(
 
         <div class="section">
             <h2>Advanced</h2>
+            <p><a href="/update" class="button">Firmware Update (OTA)</a></p>
             <p><a href="#" class="button red" onclick="factoryReset()">Factory Reset</a></p>
         </div>
     </div>
@@ -155,6 +171,69 @@ const char* index_html = R"rawliteral(
                     .then(response => response.text())
                     .then(data => alert('Factory Reset triggered: ' + data))
                     .catch(error => console.error('Error:', error));
+            }
+        }
+
+        function scanWiFi() {
+            document.getElementById('scanStatus').textContent = 'Scanning for networks...';
+            document.getElementById('wifiSection').style.display = 'none';
+
+            fetch('/scan')
+                .then(response => response.json())
+                .then(data => {
+                    const select = document.getElementById('wifiNetwork');
+                    select.innerHTML = '<option value="">-- Select a network --</option>';
+
+                    if (data.length === 0) {
+                        document.getElementById('scanStatus').textContent = 'No networks found';
+                        return;
+                    }
+
+                    // Sort by signal strength
+                    data.sort((a, b) => b.rssi - a.rssi);
+
+                    data.forEach(network => {
+                        if (network.ssid && network.ssid.trim() !== '') {
+                            const option = document.createElement('option');
+                            option.value = network.ssid;
+                            const signalBars = network.rssi > -60 ? '****' : network.rssi > -70 ? '***' : network.rssi > -80 ? '**' : '*';
+                            const encryption = network.encryption === 7 ? '[Open]' : '[Secure]';
+                            option.textContent = `${encryption} ${network.ssid} ${signalBars}`;
+                            select.appendChild(option);
+                        }
+                    });
+
+                    document.getElementById('scanStatus').textContent = `Found ${data.length} network(s)`;
+                    document.getElementById('wifiSection').style.display = 'block';
+                })
+                .catch(error => {
+                    console.error('Error:', error);
+                    document.getElementById('scanStatus').textContent = 'Scan failed';
+                });
+        }
+
+        function connectWiFi() {
+            const ssid = document.getElementById('wifiNetwork').value;
+            const password = document.getElementById('wifiPassword').value;
+
+            if (!ssid) {
+                alert('Please select a network');
+                return;
+            }
+
+            if (confirm(`Connect to ${ssid}?\n\nThe device will restart if the connection is successful.`)) {
+                document.getElementById('scanStatus').textContent = 'Connecting...';
+
+                fetch(`/connect?ssid=${encodeURIComponent(ssid)}&password=${encodeURIComponent(password)}`)
+                    .then(response => response.text())
+                    .then(data => {
+                        alert(data);
+                        document.getElementById('scanStatus').textContent = 'Connection attempt sent. Please wait for device to restart...';
+                    })
+                    .catch(error => {
+                        console.error('Error:', error);
+                        document.getElementById('scanStatus').textContent = 'Connection failed';
+                    });
             }
         }
 
@@ -359,7 +438,20 @@ void handleApiUpdate() {
 void handleReconfigureWiFi() {
     server.send(200, "text/plain", "WiFi Reconfiguration triggered. Device restarting to AP mode.");
     delay(100); // Give time for response to send
-    wifiManager.startConfigPortal(WIFI_AP_NAME, WIFI_AP_PASSWORD); // Restart into AP mode
+
+    // Set failsafe mode and display AP credentials on screen
+    wifiFailsafeMode = true;
+    displayShowMessage("AP Mode\n\nSSID:\n" + String(WIFI_AP_NAME) + "\n\nPassword:\n" + apPassword);
+    delay(1000); // Give time for display update
+
+    wifiManager.startConfigPortal(WIFI_AP_NAME, apPassword.c_str()); // Restart into AP mode with random password
+
+    // After config portal exits, check if connected
+    if (WiFi.status() == WL_CONNECTED) {
+        wifiFailsafeMode = false;
+        displayShowMessage("WiFi OK\n" + WiFi.localIP().toString());
+        delay(2000);
+    }
     // ESP.restart(); // WiFiManager.startConfigPortal() usually reboots itself
 }
 
@@ -370,27 +462,40 @@ void handleFactoryReset() {
 
     logPrint("Performing factory reset...");
 
-    // Clear EEPROM settings
-    // A simple way to clear all settings is to write default settings
+    // Clear WiFi credentials FIRST (most important)
+    logPrint("Clearing WiFi credentials...");
+    WiFi.disconnect(true);  // Disconnect and erase WiFi credentials
+    delay(100);
+
+    // Use WiFiManager to reset settings (clears WiFi config sector)
+    wifiManager.resetSettings();
+    logPrint("WiFiManager settings cleared.");
+    delay(100);
+
+    // Also erase ESP8266 WiFi config sector for complete wipe
+    ESP.eraseConfig();
+    logPrint("ESP WiFi config erased.");
+    delay(100);
+
+    // Clear EEPROM settings (our custom settings)
     settingsInit(); // Ensure EEPROM is ready
     Settings defaultSettings;
-    defaultSettings.brightness = 70;
-    defaultSettings.theme = 0;
-    defaultSettings.lastImage[0] = '\0';
-    defaultSettings.gmtOffset = 3600;      // Default to +1 hour (CET)
-    defaultSettings.valid = true;
+    settingsReset(defaultSettings);  // Use the proper reset function
     settingsSave(defaultSettings);
     logPrint("EEPROM settings cleared/reset.");
 
+    // Clear boot counter
+    bootCounterReset();
+    logPrint("Boot counter reset.");
 
-    // Format LittleFS
+    // Format LittleFS (delete all files)
+    logPrint("Formatting LittleFS...");
     LittleFS.format();
     logPrint("LittleFS formatted.");
 
-    // Clear WiFi settings (WiFiManager handles this by restarting into AP mode)
-    WiFi.disconnect(true); // Disconnect from current WiFi and forget credentials
-    logPrint("WiFi credentials cleared.");
-    
+    logPrint("Factory reset complete. Restarting...");
+    delay(1000);
+
     ESP.restart(); // Restart the device
 }
 
@@ -448,6 +553,80 @@ void handleLog() {
     server.send(200, "text/plain", log);
 }
 
+void handleWiFiScan() {
+    logPrint("Starting WiFi scan...");
+
+    // Scan for networks (async scan to avoid blocking AP mode)
+    int numNetworks = WiFi.scanNetworks(false, true); // async=false, show_hidden=true
+
+    String json = "[";
+    for (int i = 0; i < numNetworks; i++) {
+        if (i > 0) json += ",";
+        json += "{";
+        json += "\"ssid\":\"" + WiFi.SSID(i) + "\",";
+        json += "\"rssi\":" + String(WiFi.RSSI(i)) + ",";
+        json += "\"encryption\":" + String(WiFi.encryptionType(i));
+        json += "}";
+    }
+    json += "]";
+
+    WiFi.scanDelete(); // Clear scan results
+    logPrintf("WiFi scan complete. Found %d networks", numNetworks);
+
+    server.send(200, "application/json", json);
+}
+
+void handleWiFiConnect() {
+    if (!server.hasArg("ssid")) {
+        server.send(400, "text/plain", "Missing SSID parameter");
+        return;
+    }
+
+    String ssid = server.arg("ssid");
+    String password = server.hasArg("password") ? server.arg("password") : "";
+
+    logPrintf("Attempting to connect to WiFi: %s", ssid.c_str());
+    server.send(200, "text/plain", "Connecting to " + ssid + "... Device will restart if successful.");
+    delay(100);
+
+    // Enable persistent WiFi credentials storage
+    WiFi.persistent(true);
+    WiFi.setAutoReconnect(true);
+
+    // Disconnect from AP mode and switch to STA mode
+    WiFi.softAPdisconnect(true);
+    delay(100);
+
+    WiFi.mode(WIFI_STA);
+    delay(100);
+
+    // Connect to new WiFi with credentials
+    WiFi.begin(ssid.c_str(), password.c_str());
+
+    // Wait up to 20 seconds for connection
+    int attempts = 0;
+    while (WiFi.status() != WL_CONNECTED && attempts < 40) {
+        delay(500);
+        attempts++;
+        yield();
+    }
+
+    if (WiFi.status() == WL_CONNECTED) {
+        logPrintf("Successfully connected to %s", ssid.c_str());
+        logPrintf("IP address: %s", WiFi.localIP().toString().c_str());
+
+        // Credentials are now saved, restart to apply changes
+        delay(1000);
+        ESP.restart();
+    } else {
+        logPrintf("Failed to connect to %s", ssid.c_str());
+        // Restart AP mode
+        WiFi.mode(WIFI_AP);
+        WiFi.softAP(WIFI_AP_NAME, apPassword.c_str());
+        logPrint("Connection failed, AP mode restarted");
+    }
+}
+
 void webserverInit() {
     // GET endpoints
     server.on("/", HTTP_GET, handleRoot);
@@ -459,6 +638,8 @@ void webserverInit() {
     server.on("/log", HTTP_GET, handleLog);
     server.on("/reconfigurewifi", HTTP_GET, handleReconfigureWiFi);
     server.on("/factoryreset", HTTP_GET, handleFactoryReset);
+    server.on("/scan", HTTP_GET, handleWiFiScan);
+    server.on("/connect", HTTP_GET, handleWiFiConnect);
 
     // POST endpoints
     server.on("/api/update", HTTP_POST, handleApiUpdate);

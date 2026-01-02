@@ -10,12 +10,16 @@ struct DisplayState {
     String ipInfo;      // IP address or network info to show at top
     bool showImage;     // True if an image is currently displayed
     String imagePath;   // Path to the image file
+    bool apMode;        // True when showing AP mode credentials screen
+    String apSSID;      // AP mode SSID to display
+    String apPassword;  // AP mode password to display
 };
 
 void displayInit();
 void displaySetBrightness(int brightness);
 void displayUpdate();
 void displayRenderClock();
+void displayRenderAPMode();
 void displayRenderImage(const String &path);
 void displayShowMessage(const String &msg);
 
