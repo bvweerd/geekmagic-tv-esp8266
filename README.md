@@ -73,8 +73,10 @@ If all connection attempts fail:
 
 #### Failsafe AP Mode
 When in failsafe mode:
-- Device runs as Access Point (`SmartClock-Setup` / `smartclock123`)
-- Web interface remains accessible via AP IP
+- Device runs as Access Point (SSID: `SmartClock-Setup`)
+- **AP credentials displayed on device screen** (SSID, password, and IP address)
+- Random password generated for security (12-character alphanumeric)
+- Web interface remains accessible via AP IP (typically 192.168.4.1)
 - Retries WiFi connection every 5 minutes automatically
 - If connection succeeds: restarts to restore full functionality
 - mDNS and OTA temporarily disabled to conserve resources
@@ -138,10 +140,13 @@ pio device monitor
 ## First boot
 
 1. Device starts in AP mode "SmartClock-Setup"
-2. Connect with WiFi password "smartclock123"
-3. Captive portal opens automatically
-4. Configure WiFi credentials
-5. Device reboots and connects to the network
+2. **Look at the device display** to see the randomly generated AP password
+   - Alternatively, connect via serial console (115200 baud) to see the password
+3. Connect to the "SmartClock-Setup" WiFi network using the displayed password
+4. Captive portal opens automatically
+5. Configure WiFi credentials
+6. Device reboots and connects to the network
+7. The device display will now show the IP address at the top of the clock screen
 
 ## Usage
 
@@ -211,16 +216,43 @@ Stored in EEPROM:
 - GMT Offset (in seconds)
 - Last displayed image (temporary, cleared on boot)
 
-## Display Modes
+## Display Modes & Information
 
-### Clock Mode
-- Shows current time (HH:MM) and date (DD-MM-YYYY)
-- Updates regularly via NTP synchronization
-- All other elements (WiFi signal, IP, power bar, media text, icon grid) have been removed for a cleaner, simplified view.
+### Clock Mode (Normal Operation)
+- **Time Display**: Large, centered time (HH:MM) from NTP synchronization
+- **Date Display**: Below time, shows DD-MM-YYYY format
+- **IP Address**: Small text at top of screen showing current IP address (allows easy access without serial monitor)
+- **Auto-Updates**: Display refreshes every 5 seconds
+
+### Clock Mode (AP Failsafe Mode)
+When the device is in AP/failsafe mode, the display automatically shows:
+- **"AP Mode Active"** message
+- **SSID**: The access point name (SmartClock-Setup)
+- **Password**: The randomly generated 12-character password
+- **IP Address**: The AP IP address (typically 192.168.4.1) shown at top
+
+This ensures you can always see the connection credentials on the device screen without needing serial access.
 
 ### Image Mode
 - JPEG rendering (240x240)
-- Images are uploaded via `/doUpload` and are temporary (cleared on reboot).
+- Images are uploaded via `/doUpload` and are temporary (cleared on reboot)
+
+## Security Features
+
+### Random AP Password Generation
+For enhanced security, the device generates a **unique random 12-character alphanumeric password** on each boot when AP mode is activated. This prevents unauthorized access to your device's configuration portal.
+
+**Password Characteristics:**
+- Length: 12 characters
+- Character set: a-z, A-Z, 0-9
+- Generated using hardware random number generator (ESP.getCycleCount() ^ micros() ^ ESP.getChipId())
+- Displayed on device screen in AP mode
+- Logged to serial console at boot
+
+**How to find your AP password:**
+1. **On the device display**: When in AP mode, the password is shown on screen
+2. **Via serial console**: Connect to serial port (115200 baud) and look for "Generated AP Password: ..."
+3. **After first boot**: The password persists for the session but changes after reboot
 
 ## Troubleshooting
 
@@ -229,8 +261,15 @@ Stored in EEPROM:
 - Verify TFT_eSPI build flags in platformio.ini
 
 ### WiFi doesn't connect
-- Use the "Reconfigure WiFi" option in the Web Control Panel.
-- Check WiFi credentials.
+- Check the device display for the current AP password (randomly generated)
+- Use the "Reconfigure WiFi" option in the Web Control Panel
+- Check WiFi credentials
+- If in AP mode, the SSID, password, and IP address are shown on the display
+
+### Can't find device IP address
+- **Look at the device display**: The IP address is shown at the top of the clock screen in small text
+- Alternatively, use mDNS: `smartclock.local`
+- Check your router's DHCP client list
 
 ### OTA doesn't work
 - Verify device on network: `ping smartclock.local`
@@ -284,9 +323,12 @@ pio run -t uploadfs
 
 ## Credentials
 
-- WiFi AP: SmartClock-Setup / smartclock123
-- OTA: admin
-- mDNS: smartclock.local
+- **WiFi AP SSID**: SmartClock-Setup
+- **WiFi AP Password**: Random 12-character alphanumeric (see device display or serial console)
+- **OTA Password**: admin
+- **mDNS Hostname**: smartclock.local
+
+**Note**: The AP password is randomly generated on each boot for security. Always check the device display when connecting in AP mode.
 
 ## License
 

@@ -7,6 +7,7 @@
 struct DisplayState {
     String line1;       // Used for NTP time
     String line2;       // Used for custom messages
+    String ipInfo;      // IP address or network info to show at top
     bool showImage;     // True if an image is currently displayed
     String imagePath;   // Path to the image file
 };

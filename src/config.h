@@ -10,7 +10,7 @@
 
 // WiFi settings
 #define WIFI_AP_NAME "SmartClock-Setup"
-#define WIFI_AP_PASSWORD "smartclock123"
+// AP password is auto-generated (12-char random alphanumeric) at runtime
 #define WIFI_TIMEOUT 180
 #define WIFI_RETRY_ATTEMPTS 5
 #define WIFI_RETRY_DELAY_MS 2000

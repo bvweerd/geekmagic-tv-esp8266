@@ -24,6 +24,23 @@ unsigned long lastDisplayUpdate = 0;
 unsigned long lastWiFiCheck = 0;
 unsigned long lastWiFiReconnectAttempt = 0;
 bool wifiFailsafeMode = false;  // True when in AP-only mode after connection failures
+String apPassword = "";  // Generated random AP password
+
+// Generate a random alphanumeric password
+String generateRandomPassword(int length) {
+    const char charset[] = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789";
+    String password = "";
+
+    // Seed random with hardware random number generator
+    randomSeed(ESP.getCycleCount() ^ micros() ^ ESP.getChipId());
+
+    for (int i = 0; i < length; i++) {
+        int index = random(0, sizeof(charset) - 1);
+        password += charset[index];
+    }
+
+    return password;
+}
 
 bool tryConnectWiFi(int maxAttempts) {
     Serial.printf("Attempting WiFi connection (max %d attempts)...\n", maxAttempts);
@@ -65,6 +82,12 @@ bool tryConnectWiFi(int maxAttempts) {
 void setupWiFi() {
     displayShowMessage("WiFi Setup...");
 
+    // Generate random AP password if not already generated
+    if (apPassword.isEmpty()) {
+        apPassword = generateRandomPassword(12);
+        Serial.printf("Generated AP Password: %s\n", apPassword.c_str());
+    }
+
     // First try to connect to saved WiFi credentials with retry
     if (tryConnectWiFi(WIFI_RETRY_ATTEMPTS)) {
         wifiFailsafeMode = false;
@@ -78,19 +101,22 @@ void setupWiFi() {
 
     wifiManager.setConfigPortalTimeout(WIFI_TIMEOUT);
 
-    if (!wifiManager.autoConnect(WIFI_AP_NAME, WIFI_AP_PASSWORD)) {
+    if (!wifiManager.autoConnect(WIFI_AP_NAME, apPassword.c_str())) {
         // WiFiManager timeout - enter failsafe AP-only mode
         Serial.println("WiFiManager timeout - entering failsafe AP mode");
-        displayShowMessage("Failsafe Mode\nAP Active");
 
         WiFi.mode(WIFI_AP);
-        WiFi.softAP(WIFI_AP_NAME, WIFI_AP_PASSWORD);
+        WiFi.softAP(WIFI_AP_NAME, apPassword.c_str());
 
         wifiFailsafeMode = true;
 
-        Serial.printf("Failsafe AP started. IP: %s\n", WiFi.softAPIP().toString().c_str());
-        displayShowMessage("AP Mode\n" + WiFi.softAPIP().toString());
-        delay(3000);
+        Serial.printf("Failsafe AP started\n");
+        Serial.printf("  SSID: %s\n", WIFI_AP_NAME);
+        Serial.printf("  Password: %s\n", apPassword.c_str());
+        Serial.printf("  IP: %s\n", WiFi.softAPIP().toString().c_str());
+
+        displayShowMessage("AP Mode\nSSID: " + String(WIFI_AP_NAME) + "\nPass: " + apPassword);
+        delay(5000);
     } else {
         wifiFailsafeMode = false;
         displayShowMessage("WiFi OK\n" + WiFi.localIP().toString());
@@ -125,13 +151,18 @@ void monitorWiFi() {
 
             if (!tryConnectWiFi(3)) {  // Try 3 quick attempts
                 Serial.println("Reconnection failed - entering failsafe mode");
-                displayShowMessage("WiFi Lost!\nAP Mode");
 
                 WiFi.mode(WIFI_AP);
-                WiFi.softAP(WIFI_AP_NAME, WIFI_AP_PASSWORD);
+                WiFi.softAP(WIFI_AP_NAME, apPassword.c_str());
                 wifiFailsafeMode = true;
 
-                Serial.printf("Failsafe AP started. IP: %s\n", WiFi.softAPIP().toString().c_str());
+                Serial.printf("Failsafe AP started\n");
+                Serial.printf("  SSID: %s\n", WIFI_AP_NAME);
+                Serial.printf("  Password: %s\n", apPassword.c_str());
+                Serial.printf("  IP: %s\n", WiFi.softAPIP().toString().c_str());
+
+                displayShowMessage("WiFi Lost!\nAP Mode Active\nSSID: " + String(WIFI_AP_NAME) + "\nPass: " + apPassword);
+                delay(3000);
             }
         }
     }
@@ -320,12 +351,15 @@ void loop() {
         // Only update time if not showing an image
         if (!displayState.showImage) {
             displayState.line1 = timeClient.getFormattedTime();
+            displayState.ipInfo = WiFi.localIP().toString();  // Show IP address at top
+            displayState.line2 = "";  // Clear custom message in normal mode
         }
     } else {
-        // In failsafe mode, show a status message
+        // In failsafe mode, show AP credentials on display
         if (!displayState.showImage) {
-            displayState.line1 = "AP Mode";
-            displayState.line2 = WiFi.softAPIP().toString();
+            displayState.line1 = "AP Mode Active";
+            displayState.ipInfo = WiFi.softAPIP().toString();  // Show AP IP at top
+            displayState.line2 = "SSID: " + String(WIFI_AP_NAME) + "\nPassword: " + apPassword;
         }
     }
 
