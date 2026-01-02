@@ -21,20 +21,120 @@ WiFiUDP ntpUDP;
 NTPClient timeClient(ntpUDP, NTP_SERVER, appSettings.gmtOffset);
 WiFiManager wifiManager;
 unsigned long lastDisplayUpdate = 0;
+unsigned long lastWiFiCheck = 0;
+unsigned long lastWiFiReconnectAttempt = 0;
+bool wifiFailsafeMode = false;  // True when in AP-only mode after connection failures
+
+bool tryConnectWiFi(int maxAttempts) {
+    Serial.printf("Attempting WiFi connection (max %d attempts)...\n", maxAttempts);
+
+    for (int attempt = 1; attempt <= maxAttempts; attempt++) {
+        Serial.printf("WiFi attempt %d/%d\n", attempt, maxAttempts);
+        displayShowMessage("WiFi...\nAttempt " + String(attempt) + "/" + String(maxAttempts));
+
+        WiFi.mode(WIFI_STA);
+        WiFi.begin();
+
+        unsigned long startAttempt = millis();
+        while (WiFi.status() != WL_CONNECTED &&
+               millis() - startAttempt < WIFI_CONNECTION_TIMEOUT) {
+            delay(100);
+            yield();
+        }
+
+        if (WiFi.status() == WL_CONNECTED) {
+            Serial.println("WiFi connected!");
+            Serial.printf("IP: %s\n", WiFi.localIP().toString().c_str());
+            displayShowMessage("WiFi OK\n" + WiFi.localIP().toString());
+            delay(2000);
+            return true;
+        }
+
+        // Exponential backoff between retries (except on last attempt)
+        if (attempt < maxAttempts) {
+            int delayMs = WIFI_RETRY_DELAY_MS * (1 << (attempt - 1)); // 2s, 4s, 8s, 16s...
+            delayMs = min(delayMs, 30000); // Cap at 30 seconds
+            Serial.printf("Retry in %d ms...\n", delayMs);
+            delay(delayMs);
+        }
+    }
+
+    return false;
+}
 
 void setupWiFi() {
     displayShowMessage("WiFi Setup...");
 
+    // First try to connect to saved WiFi credentials with retry
+    if (tryConnectWiFi(WIFI_RETRY_ATTEMPTS)) {
+        wifiFailsafeMode = false;
+        return;
+    }
+
+    // If connection failed, start AP mode with WiFiManager
+    Serial.println("WiFi connection failed - starting AP mode");
+    displayShowMessage("WiFi Failed!\nStarting AP...");
+    delay(2000);
+
     wifiManager.setConfigPortalTimeout(WIFI_TIMEOUT);
 
     if (!wifiManager.autoConnect(WIFI_AP_NAME, WIFI_AP_PASSWORD)) {
-        displayShowMessage("WiFi Failed!");
+        // WiFiManager timeout - enter failsafe AP-only mode
+        Serial.println("WiFiManager timeout - entering failsafe AP mode");
+        displayShowMessage("Failsafe Mode\nAP Active");
+
+        WiFi.mode(WIFI_AP);
+        WiFi.softAP(WIFI_AP_NAME, WIFI_AP_PASSWORD);
+
+        wifiFailsafeMode = true;
+
+        Serial.printf("Failsafe AP started. IP: %s\n", WiFi.softAPIP().toString().c_str());
+        displayShowMessage("AP Mode\n" + WiFi.softAPIP().toString());
         delay(3000);
-        ESP.restart();
+    } else {
+        wifiFailsafeMode = false;
+        displayShowMessage("WiFi OK\n" + WiFi.localIP().toString());
+        delay(2000);
+    }
+}
+
+void monitorWiFi() {
+    // In failsafe mode, periodically try to reconnect to WiFi
+    if (wifiFailsafeMode) {
+        if (millis() - lastWiFiReconnectAttempt > WIFI_RECONNECT_INTERVAL) {
+            Serial.println("Failsafe mode: attempting WiFi reconnection...");
+            lastWiFiReconnectAttempt = millis();
+
+            if (tryConnectWiFi(2)) {  // Quick 2 attempts
+                wifiFailsafeMode = false;
+                Serial.println("Reconnected! Exiting failsafe mode");
+                // Restart to reinitialize services properly
+                delay(1000);
+                ESP.restart();
+            }
+        }
+        return;
     }
 
-    displayShowMessage("WiFi OK\n" + WiFi.localIP().toString());
-    delay(2000);
+    // Normal mode: check WiFi connection periodically
+    if (millis() - lastWiFiCheck > WIFI_MONITOR_INTERVAL) {
+        lastWiFiCheck = millis();
+
+        if (WiFi.status() != WL_CONNECTED) {
+            Serial.println("WiFi connection lost - attempting reconnection");
+
+            if (!tryConnectWiFi(3)) {  // Try 3 quick attempts
+                Serial.println("Reconnection failed - entering failsafe mode");
+                displayShowMessage("WiFi Lost!\nAP Mode");
+
+                WiFi.mode(WIFI_AP);
+                WiFi.softAP(WIFI_AP_NAME, WIFI_AP_PASSWORD);
+                wifiFailsafeMode = true;
+
+                Serial.printf("Failsafe AP started. IP: %s\n", WiFi.softAPIP().toString().c_str());
+            }
+        }
+    }
 }
 
 void setupMDNS() {
@@ -127,9 +227,32 @@ void setup() {
     delay(100);
 
     loggerInit();
-    logPrint("\n\nSmartClock Starting...");
+    logPrint("\n\n========================================");
+    logPrint("SmartClock Starting...");
+    logPrintf("Firmware Version: %d", FIRMWARE_VERSION);
 
+    // Initialize EEPROM and boot counter
     settingsInit();
+    bootCounterInit();  // Increment boot failure counter
+
+    // Check for boot failure threshold
+    if (bootCounterCheckFailsafe()) {
+        Serial.println("========================================");
+        Serial.println("CRITICAL: Boot failure threshold reached!");
+        Serial.println("Performing emergency EEPROM reset...");
+        Serial.println("========================================");
+
+        // Emergency reset
+        settingsReset(appSettings);
+        settingsSave(appSettings);
+        bootCounterReset();
+
+        Serial.println("EEPROM reset complete. System will restart in 5 seconds...");
+        delay(5000);
+        ESP.restart();
+    }
+
+    // Load and validate settings
     settingsLoad(appSettings);
 
     displayInit();
@@ -142,24 +265,26 @@ void setup() {
     setupWiFi();
 
     // NTP initialization using NTPClient library
-    timeClient.begin();
-    // Set time offsets are now part of the global NTPClient constructor
-    // timeClient.setTimeOffset(appSettings.gmtOffset);
-    // timeClient.setDaylightOffset(appSettings.daylightOffset);
-    logPrint("NTP: Initializing time synchronization using NTPClient...");
+    if (!wifiFailsafeMode) {
+        timeClient.begin();
+        logPrint("NTP: Initializing time synchronization using NTPClient...");
+    } else {
+        logPrint("NTP: Skipped (failsafe mode)");
+    }
 
-    setupMDNS();
-    setupOTA();
+    // Only setup mDNS and OTA if not in failsafe mode
+    if (!wifiFailsafeMode) {
+        setupMDNS();
+        setupOTA();
+    } else {
+        logPrint("mDNS/OTA: Skipped (failsafe mode)");
+    }
 
     currentBrightness = 100;  // Keep full brightness
     currentTheme = appSettings.theme;
     currentImage = String(appSettings.lastImage);
 
     // Always default to clock display on boot as images are cleared
-    // if (appSettings.lastImage[0] != '\0') {
-    //     displayState.imagePath = String(appSettings.lastImage);
-    //     displayState.showImage = true;
-    // }
     displayState.showImage = false;
 
     webserverInit();
@@ -171,21 +296,40 @@ void setup() {
     displayUpdate();
     logPrint("Display updated");
 
-    logPrintf("Setup complete. IP: %s", WiFi.localIP().toString().c_str());
+    // Boot successful - reset failure counter
+    bootCounterReset();
+    logPrint("Boot completed successfully");
+
+    if (wifiFailsafeMode) {
+        logPrintf("Running in FAILSAFE mode. AP IP: %s", WiFi.softAPIP().toString().c_str());
+    } else {
+        logPrintf("Setup complete. IP: %s", WiFi.localIP().toString().c_str());
+    }
 }
 
 void loop() {
-    ArduinoOTA.handle();
-    MDNS.update();
-    webserverHandle();
+    // Monitor WiFi connection and handle failsafe mode
+    monitorWiFi();
 
-    timeClient.update(); // Keep NTP client updated
+    // Only handle OTA and mDNS if not in failsafe mode
+    if (!wifiFailsafeMode) {
+        ArduinoOTA.handle();
+        MDNS.update();
+        timeClient.update(); // Keep NTP client updated
 
-    // Only update time if not showing an image
-    if (!displayState.showImage) {
-        displayState.line1 = timeClient.getFormattedTime();
+        // Only update time if not showing an image
+        if (!displayState.showImage) {
+            displayState.line1 = timeClient.getFormattedTime();
+        }
+    } else {
+        // In failsafe mode, show a status message
+        if (!displayState.showImage) {
+            displayState.line1 = "AP Mode";
+            displayState.line2 = WiFi.softAPIP().toString();
+        }
     }
-    
+
+    webserverHandle();
 
     if (millis() - lastDisplayUpdate > DISPLAY_UPDATE_INTERVAL) {
         if (!displayState.showImage) {

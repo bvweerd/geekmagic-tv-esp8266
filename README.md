@@ -1,7 +1,17 @@
 # SmartClock Arduino
-# WARNING: UPDATING VIA OTA MIGHT BRICK THE DEVICE. IF IT FAILS, USE UART FLASH METHOD! 
 
 ESP8266 SmartClock with GeekMagic API compatibility.
+
+## ⚠️ OTA Update Safety
+
+This firmware implements **robust OTA update protection** with multiple failsafe mechanisms:
+- ✅ Automatic EEPROM validation with CRC32 checksums
+- ✅ Boot failure detection and automatic recovery
+- ✅ WiFi connection retry with exponential backoff
+- ✅ Automatic fallback to AP mode when WiFi fails
+- ✅ Emergency EEPROM reset after repeated boot failures
+
+**While OTA updates are now significantly safer, always keep a USB cable available for emergency recovery via UART if needed.**
 
 ## Features
 
@@ -17,6 +27,94 @@ ESP8266 SmartClock with GeekMagic API compatibility.
 - ✅ Live update API
 - ✅ Simplified clock display (time and date only)
 - ✅ Temporary image upload and rendering (images cleared on boot)
+
+## 🛡️ OTA Stability & Recovery Features
+
+### EEPROM Validation System
+
+The firmware implements a three-layer validation system to prevent corruption from affecting operations:
+
+1. **Magic Number Check** (`0xCAFE`): Quick validation that settings exist
+2. **Firmware Version Check**: Ensures settings structure matches current firmware version
+3. **CRC32 Checksum**: Validates data integrity of all settings
+
+When any validation fails, the system automatically:
+- Logs the specific failure reason
+- Resets settings to factory defaults
+- Saves validated defaults back to EEPROM
+- Continues boot with safe defaults
+
+### Boot Failure Detection
+
+The firmware tracks consecutive boot failures to detect crash loops:
+
+- **Boot Counter**: Incremented at start of each boot attempt
+- **Reset on Success**: Counter cleared when boot completes successfully
+- **Failsafe Threshold**: After 5 consecutive failed boots, triggers emergency recovery
+- **Emergency Recovery**: Performs complete EEPROM reset and restarts device
+
+This prevents infinite crash loops after problematic OTA updates.
+
+### WiFi Connection Resilience
+
+Enhanced WiFi connection handling with multiple fallback levels:
+
+#### Initial Connection (5 attempts with exponential backoff)
+1. Attempt 1: Immediate connection try (30s timeout)
+2. Attempt 2: Retry after 2 seconds
+3. Attempt 3: Retry after 4 seconds
+4. Attempt 4: Retry after 8 seconds
+5. Attempt 5: Retry after 16 seconds
+
+#### Fallback to AP Mode
+If all connection attempts fail:
+- Starts WiFiManager captive portal (3 minute timeout)
+- If user doesn't configure: enters **Failsafe AP Mode**
+
+#### Failsafe AP Mode
+When in failsafe mode:
+- Device runs as Access Point (`SmartClock-Setup` / `smartclock123`)
+- Web interface remains accessible via AP IP
+- Retries WiFi connection every 5 minutes automatically
+- If connection succeeds: restarts to restore full functionality
+- mDNS and OTA temporarily disabled to conserve resources
+
+#### Runtime WiFi Monitoring
+During normal operation:
+- Checks connection status every 60 seconds
+- If connection lost: 3 quick reconnection attempts
+- If reconnection fails: switches to Failsafe AP Mode
+
+### Configuration
+
+Key settings in `src/config.h`:
+```cpp
+#define WIFI_RETRY_ATTEMPTS 5          // Initial connection attempts
+#define WIFI_RETRY_DELAY_MS 2000        // Base delay for exponential backoff
+#define WIFI_CONNECTION_TIMEOUT 30000   // 30s timeout per attempt
+#define WIFI_MONITOR_INTERVAL 60000     // Check WiFi every 60s
+#define WIFI_RECONNECT_INTERVAL 300000  // Retry in AP mode every 5min
+#define BOOT_FAILURE_THRESHOLD 5        // Emergency reset after 5 failures
+#define FIRMWARE_VERSION 2              // Increment when Settings struct changes
+```
+
+### Best Practices for OTA Updates
+
+1. **Always test new firmware on a development device first**
+2. **Increment `FIRMWARE_VERSION` when changing the `Settings` struct**
+3. **Monitor serial output during first boot after OTA update**
+4. **Keep credentials to your WiFi network accessible**
+5. **Document any EEPROM layout changes in release notes**
+
+### Recovery Scenarios
+
+| Scenario | Automatic Recovery | Manual Recovery |
+|----------|-------------------|-----------------|
+| Corrupted EEPROM data | ✅ Automatic reset to defaults | Not needed |
+| Invalid firmware version | ✅ Automatic reset to defaults | Not needed |
+| WiFi network unavailable | ✅ Fallback to AP mode, periodic retry | Connect to AP and reconfigure |
+| 5+ consecutive boot failures | ✅ Emergency EEPROM reset + restart | Not needed |
+| Complete crash/brick | ❌ Not possible | Flash via USB/UART |
 
 ## Hardware
 

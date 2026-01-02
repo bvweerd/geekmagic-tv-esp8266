@@ -12,6 +12,11 @@
 #define WIFI_AP_NAME "SmartClock-Setup"
 #define WIFI_AP_PASSWORD "smartclock123"
 #define WIFI_TIMEOUT 180
+#define WIFI_RETRY_ATTEMPTS 5
+#define WIFI_RETRY_DELAY_MS 2000
+#define WIFI_CONNECTION_TIMEOUT 30000  // 30 seconds per attempt
+#define WIFI_MONITOR_INTERVAL 60000    // Check WiFi every 60 seconds
+#define WIFI_RECONNECT_INTERVAL 300000 // Try to reconnect every 5 minutes in AP mode
 
 // mDNS settings
 #define MDNS_HOSTNAME "smartclock"
