@@ -1,6 +1,11 @@
 # SmartClock Arduino
 
-ESP8266 SmartClock with GeekMagic API compatibility.
+ESP8266 SmartClock with GeekMagic API compatibility. Works with: https://github.com/adrienbrault/geekmagic-hacs
+
+This firmware is made for the GeekMagic SmallTV Smart Weather Clock as can be found in online stores. 
+
+The Smalltv and Smalltv-Ultra are based on an ESP8266, while the Smalltv-Pro uses an ESP32 with more memory and processing power.
+This code has only been tested on the basic Smalltv (ESP8266) and may require modifications for other variants.
 
 ## ⚠️ OTA Update Safety
 
