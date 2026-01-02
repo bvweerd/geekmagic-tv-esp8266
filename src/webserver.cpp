@@ -6,267 +6,29 @@
 #include <LittleFS.h>
 #include <ArduinoJson.h>
 #include <ESP8266WebServer.h>
+#include <ESP8266WiFi.h>   // For WiFi.softAPIP()
 #include <WiFiManager.h> // Include WiFiManager here
 
 ESP8266WebServer server(WEB_SERVER_PORT);
 
 int currentBrightness = 70;
 int currentTheme = 0;
-String currentImage = "";
+char currentImage[DISPLAY_PATH_BUFFER_SIZE];
 
 extern Settings appSettings;
 
 // File upload buffer
 File uploadFile;
 
-const char* index_html = R"rawliteral(
-<!DOCTYPE html>
-<html>
-<head>
-    <title>SmartClock Control</title>
-    <meta name="viewport" content="width=device-width, initial-scale=1">
-    <style>
-        body { font-family: Arial, sans-serif; margin: 20px; background-color: #f0f0f0; color: #333; }
-        .container { background-color: #fff; padding: 20px; border-radius: 8px; box-shadow: 0 2px 4px rgba(0,0,0,0.1); max-width: 600px; margin: auto; }
-        h1 { color: #0056b3; text-align: center; margin-bottom: 20px; }
-        .section { margin-bottom: 20px; padding: 15px; background-color: #e9ecef; border-radius: 5px; }
-        .section h2 { margin-top: 0; color: #0056b3; }
-        .button {
-            display: inline-block;
-            background-color: #007bff;
-            color: white;
-            padding: 10px 15px;
-            border: none;
-            border-radius: 5px;
-            cursor: pointer;
-            text-decoration: none;
-            margin: 5px 0;
-            font-size: 16px;
-        }
-        .button:hover { background-color: #0056b3; }
-        .button.red { background-color: #dc3545; }
-        .button.red:hover { background-color: #c82333; }
-        .input-group { margin-bottom: 10px; }
-        .input-group label { display: block; margin-bottom: 5px; font-weight: bold; }
-        .input-group input[type="number"],
-        .input-group input[type="text"] {
-            width: calc(100% - 22px);
-            padding: 10px;
-            border: 1px solid #ccc;
-            border-radius: 4px;
-            box-sizing: border-box;
-        }
-        .info { background-color: #f8d7da; color: #721c24; border: 1px solid #f5c6cb; padding: 10px; border-radius: 5px; margin-top: 10px; }
-    </style>
-</head>
-<body>
-    <div class="container">
-        <h1>SmartClock Control</h1>
-
-        <div class="section">
-            <h2>Status & Info</h2>
-            <p><a href="/app.json" class="button">App JSON</a></p>
-            <p><a href="/space.json" class="button">Storage Info</a></p>
-            <p><a href="/brt.json" class="button">Brightness JSON</a></p>
-            <p><a href="/log" class="button">View Logs</a></p>
-        </div>
-
-        <div class="section">
-            <h2>WiFi Configuration</h2>
-            <button class="button" onclick="scanWiFi()">Scan Networks</button>
-            <div id="scanStatus" style="margin-top: 10px; font-style: italic;"></div>
-            <div class="input-group" id="wifiSection" style="display: none; margin-top: 15px;">
-                <label for="wifiNetwork">Select Network:</label>
-                <select id="wifiNetwork" style="width: 100%; padding: 10px; border: 1px solid #ccc; border-radius: 4px;">
-                    <option value="">-- Select a network --</option>
-                </select>
-                <label for="wifiPassword" style="margin-top: 10px;">Password:</label>
-                <input type="password" id="wifiPassword" placeholder="Enter WiFi password">
-                <button class="button" onclick="connectWiFi()" style="margin-top: 10px;">Connect</button>
-            </div>
-            <p style="margin-top: 15px;"><a href="#" class="button" onclick="reconfigureWiFi()">Reconfigure WiFi (Portal)</a></p>
-        </div>
-
-        <div class="section">
-            <h2>Settings</h2>
-            <div class="input-group">
-                <label for="brightness">Brightness (0-100):</label>
-                <input type="number" id="brightness" min="0" max="100" value="%BRIGHTNESS%">
-                <button class="button" onclick="setBrightness()">Set Brightness</button>
-            </div>
-            <div class="input-group">
-                <label for="gmtOffset">GMT Offset (seconds):</label>
-                <input type="number" id="gmtOffset" value="%GMTOFFSET%">
-                <button class="button" onclick="setTimezone()">Set Timezone</button>
-            </div>
-        </div>
-
-        <div class="section">
-            <h2>Image Upload</h2>
-            <form action="/doUpload?dir=/image/" method="POST" enctype="multipart/form-data">
-                <input type="file" name="file" accept="image/jpeg">
-                <input type="submit" value="Upload JPEG" class="button">
-            </form>
-            <p class="info">Uploaded images will be cleared on reboot.</p>
-            <p><a href="#" class="button" onclick="displayTestImage()">Display Test Image</a></p>
-            <div class="input-group">
-                <label for="imagePath">Display Image Path:</label>
-                <input type="text" id="imagePath" value="%IMAGEPATH%">
-                <button class="button" onclick="displayImage()">Display Image</button>
-            </div>
-        </div>
-
-        <div class="section">
-            <h2>Advanced</h2>
-            <p><a href="/update" class="button">Firmware Update (OTA)</a></p>
-            <p><a href="#" class="button red" onclick="factoryReset()">Factory Reset</a></p>
-        </div>
-    </div>
-
-    <script>
-        function setBrightness() {
-            var brightness = document.getElementById("brightness").value;
-            fetch('/set?brt=' + brightness)
-                .then(response => response.text())
-                .then(data => alert('Brightness set: ' + data))
-                .catch(error => console.error('Error:', error));
-        }
-
-        function reconfigureWiFi() {
-            if (confirm("Are you sure you want to reconfigure WiFi? This will restart the device into AP mode.")) {
-                fetch('/reconfigurewifi')
-                    .then(response => response.text())
-                    .then(data => alert('WiFi Reconfiguration triggered: ' + data))
-                    .catch(error => console.error('Error:', error));
-            }
-        }
-
-        function setTimezone() {
-            var gmtOffset = document.getElementById("gmtOffset").value;
-            fetch('/set?gmt=' + gmtOffset)
-                .then(response => response.text())
-                .then(data => alert('Timezone set: ' + data))
-                .catch(error => console.error('Error:', error));
-        }
-
-
-        function displayImage() {
-            var imagePath = document.getElementById("imagePath").value;
-            fetch('/set?img=' + imagePath)
-                .then(response => response.text())
-                .then(data => alert('Image display triggered: ' + data))
-                .catch(error => console.error('Error:', error));
-        }
-
-        function displayTestImage() {
-             fetch('/test')
-                .then(response => response.text())
-                .then(data => alert('Test Image display triggered: ' + data))
-                .catch(error => console.error('Error:', error));
-        }
-
-        function factoryReset() {
-            if (confirm("WARNING: Are you sure you want to perform a factory reset? This will erase all settings and files and restart the device.")) {
-                fetch('/factoryreset')
-                    .then(response => response.text())
-                    .then(data => alert('Factory Reset triggered: ' + data))
-                    .catch(error => console.error('Error:', error));
-            }
-        }
-
-        function scanWiFi() {
-            document.getElementById('scanStatus').textContent = 'Scanning for networks...';
-            document.getElementById('wifiSection').style.display = 'none';
-
-            fetch('/scan')
-                .then(response => response.json())
-                .then(data => {
-                    const select = document.getElementById('wifiNetwork');
-                    select.innerHTML = '<option value="">-- Select a network --</option>';
-
-                    if (data.length === 0) {
-                        document.getElementById('scanStatus').textContent = 'No networks found';
-                        return;
-                    }
-
-                    // Sort by signal strength
-                    data.sort((a, b) => b.rssi - a.rssi);
-
-                    data.forEach(network => {
-                        if (network.ssid && network.ssid.trim() !== '') {
-                            const option = document.createElement('option');
-                            option.value = network.ssid;
-                            const signalBars = network.rssi > -60 ? '****' : network.rssi > -70 ? '***' : network.rssi > -80 ? '**' : '*';
-                            const encryption = network.encryption === 7 ? '[Open]' : '[Secure]';
-                            option.textContent = `${encryption} ${network.ssid} ${signalBars}`;
-                            select.appendChild(option);
-                        }
-                    });
-
-                    document.getElementById('scanStatus').textContent = `Found ${data.length} network(s)`;
-                    document.getElementById('wifiSection').style.display = 'block';
-                })
-                .catch(error => {
-                    console.error('Error:', error);
-                    document.getElementById('scanStatus').textContent = 'Scan failed';
-                });
-        }
-
-        function connectWiFi() {
-            const ssid = document.getElementById('wifiNetwork').value;
-            const password = document.getElementById('wifiPassword').value;
-
-            if (!ssid) {
-                alert('Please select a network');
-                return;
-            }
-
-            if (confirm(`Connect to ${ssid}?\n\nThe device will restart if the connection is successful.`)) {
-                document.getElementById('scanStatus').textContent = 'Connecting...';
-
-                fetch(`/connect?ssid=${encodeURIComponent(ssid)}&password=${encodeURIComponent(password)}`)
-                    .then(response => response.text())
-                    .then(data => {
-                        alert(data);
-                        document.getElementById('scanStatus').textContent = 'Connection attempt sent. Please wait for device to restart...';
-                    })
-                    .catch(error => {
-                        console.error('Error:', error);
-                        document.getElementById('scanStatus').textContent = 'Connection failed';
-                    });
-            }
-        }
-
-        // Fetch current values on load
-        window.onload = function() {
-            fetch('/app.json')
-                .then(response => response.json())
-                .then(data => {
-                    document.getElementById('brightness').value = data.brt;
-                    document.getElementById('gmtOffset').value = data.gmtOffset;
-                    document.getElementById('imagePath').value = data.img;
-                })
-                .catch(error => console.error('Error fetching app data:', error));
-        };
-    </script>
-</body>
-</html>
-)rawliteral";
-
-void handleRoot() {
-    String html = index_html;
-    html.replace("%BRIGHTNESS%", String(currentBrightness));
-    html.replace("%GMTOFFSET%", String(appSettings.gmtOffset));
-    html.replace("%IMAGEPATH%", currentImage);
-
-    server.send(200, "text/html", html);
-}
+const char* index_html = R"rawliteral(<!DOCTYPE html><html><head><title>SmartClock Control</title><meta name="viewport" content="width=device-width, initial-scale=1"><style>:root{--primary-color:#007bff;--primary-hover-color:#0056b3;--danger-color:#dc3545;--danger-hover-color:#c82333;--background-color:#f8f9fa;--card-bg-color:#ffffff;--border-color:#dee2e6;--text-color:#212529;--light-text-color:#6c757d;--shadow-color:rgba(0,0,0,0.05);--font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,"Helvetica Neue",Arial,sans-serif}body{font-family:var(--font-family);margin:0;padding:20px;background-color:var(--background-color);color:var(--text-color);line-height:1.5}.container{max-width:600px;margin:20px auto;background-color:var(--card-bg-color);border-radius:8px;box-shadow:0 4px 12px var(--shadow-color);overflow:hidden}h1{background-color:var(--primary-color);color:white;padding:15px 20px;margin:0;font-size:1.8em;text-align:center;border-bottom:1px solid var(--primary-hover-color)}.card{background-color:var(--card-bg-color);border:1px solid var(--border-color);border-radius:8px;margin:20px;overflow:hidden;box-shadow:0 2px 5px var(--shadow-color)}.card-header{background-color:#e9ecef;padding:10px 15px;font-size:1.2em;font-weight:bold;color:var(--primary-color);border-bottom:1px solid var(--border-color)}.card-body{padding:15px}.input-group{margin-bottom:15px}.input-group label{display:block;margin-bottom:5px;font-weight:bold;color:var(--text-color)}.input-group input[type="number"],.input-group input[type="text"],.input-group input[type="password"],.input-group select{width:calc(100% - 22px);padding:10px;border:1px solid var(--border-color);border-radius:4px;box-sizing:border-box;font-size:1em;margin-top:3px}.input-group input[type="file"]{margin-top:5px}.button{display:inline-block;background-color:var(--primary-color);color:white;padding:10px 15px;border:none;border-radius:5px;cursor:pointer;text-decoration:none;font-size:1em;margin-top:10px;transition:background-color 0.2s ease}.button:hover{background-color:var(--primary-hover-color)}.button.red{background-color:var(--danger-color)}.button.red:hover{background-color:var(--danger-hover-color)}.button-group{display:flex;flex-wrap:wrap;gap:10px;margin-top:10px}.button-group .button{margin-top:0}.info{background-color:#e0f7fa;color:#006064;border:1px solid #b2ebf2;padding:10px;border-radius:5px;margin-top:15px;font-size:0.9em}#scanStatus{margin-top:10px;font-style:italic;color:var(--light-text-color)}form{margin-bottom:0}.spacer{height:10px}</style></head><body><div class="container"><h1>SmartClock Control</h1><div class="card"><div class="card-header">Status & Info</div><div class="card-body button-group"><a href="/app.json" class="button">App JSON</a><a href="/space.json" class="button">Storage Info</a><a href="/brt.json" class="button">Brightness JSON</a><a href="/log" class="button">View Logs</a></div></div><div class="card"><div class="card-header">WiFi Configuration</div><div class="card-body"><button class="button" onclick="scanWiFi()">Scan Networks</button><div id="scanStatus"></div><div id="wifiSection" style="display: none; margin-top: 15px;"><div class="input-group"><label for="wifiNetwork">Select Network:</label><select id="wifiNetwork"></select></div><div class="input-group"><label for="wifiPassword">Password:</label><input type="password" id="wifiPassword" placeholder="Enter WiFi password"></div><button class="button" onclick="connectWiFi()">Connect</button></div><div class="spacer"></div><button class="button" onclick="reconfigureWiFi()">Reconfigure WiFi (Portal)</button></div></div><div class="card"><div class="card-header">Settings</div><div class="card-body"><div class="input-group"><label for="brightness">Brightness (0-100):</label><input type="number" id="brightness" min="0" max="100"><button class="button" onclick="setBrightness()">Set Brightness</button></div><div class="input-group"><label for="gmtOffset">GMT Offset (seconds):</label><input type="number" id="gmtOffset"><button class="button" onclick="setTimezone()">Set Timezone</button></div></div></div><div class="card"><div class="card-header">Image Management</div><div class="card-body"><form action="/doUpload?dir=/image/" method="POST" enctype="multipart/form-data"><div class="input-group"><label for="fileUpload">Upload JPEG Image:</label><input type="file" name="file" accept="image/jpeg" id="fileUpload"><input type="submit" value="Upload" class="button"></div></form><div class="info">Uploaded images are stored on LittleFS and cleared on reboot unless set as default.</div><div class="input-group"><button class="button" onclick="displayTestImage()">Display Test Image</button></div><div class="input-group"><label for="imagePath">Display Image Path (e.g., /image/my_image.jpg):</label><input type="text" id="imagePath"><button class="button" onclick="displayImage()">Display Image</button></div></div></div><div class="card"><div class="card-header">Advanced Actions</div><div class="card-body button-group"><a href="/update" class="button">Firmware Update (OTA)</a><button class="button red" onclick="factoryReset()">Factory Reset</button></div></div></div><script>function setBrightness(){var brightness=document.getElementById("brightness").value;fetch('/set?brt='+brightness).then(response=>response.text()).then(data=>alert('Brightness set: '+data)).catch(error=>console.error('Error:',error));} function reconfigureWiFi(){if (confirm("Are you sure you want to reconfigure WiFi? This will restart the device into AP mode.")){fetch('/reconfigurewifi').then(response=>response.text()).then(data=>alert('WiFi Reconfiguration triggered: '+data)).catch(error=>console.error('Error:',error));}} function setTimezone(){var gmtOffset=document.getElementById("gmtOffset").value;fetch('/set?gmt='+gmtOffset).then(response=>response.text()).then(data=>alert('Timezone set: '+data)).catch(error=>console.error('Error:',error));} function displayImage(){var imagePath=document.getElementById("imagePath").value;fetch('/set?img='+imagePath).then(response=>response.text()).then(data=>alert('Image display triggered: '+data)).catch(error=>console.error('Error:',error));} function displayTestImage(){fetch('/test').then(response=>response.text()).then(data=>alert('Test Image display triggered: '+data)).catch(error=>console.error('Error:',error));} function factoryReset(){if (confirm("WARNING: Are you sure you want to perform a factory reset? This will erase all settings and files and restart the device.")){fetch('/factoryreset').then(response=>response.text()).then(data=>alert('Factory Reset triggered: '+data)).catch(error=>console.error('Error:',error));}} function scanWiFi(){document.getElementById('scanStatus').textContent='Scanning for networks...';document.getElementById('wifiSection').style.display='none';fetch('/scan').then(response=>response.json()).then(data=>{const select=document.getElementById('wifiNetwork');select.innerHTML='<option value="">--Select a network--</option>';if (data.length===0){document.getElementById('scanStatus').textContent='No networks found';return;}data.sort((a,b)=>b.rssi-a.rssi);data.forEach(network=>{if (network.ssid&&network.ssid.trim()!==''){const option=document.createElement('option');option.value=network.ssid;let signalBars='';if (network.rssi>-60) signalBars='++++';else if (network.rssi>-70) signalBars='+++';else if (network.rssi>-80) signalBars='++';else signalBars='+';const encryption=network.encryption===7 ? '[Open]' : '[Secure]';option.textContent=`${network.ssid} ${signalBars} ${encryption}`;select.appendChild(option);}});document.getElementById('scanStatus').textContent=`Found ${data.length} network(s)`;document.getElementById('wifiSection').style.display='block';}).catch(error=>{console.error('Error:',error);document.getElementById('scanStatus').textContent='Scan failed';});} function connectWiFi(){const ssid=document.getElementById('wifiNetwork').value;const password=document.getElementById('wifiPassword').value;if (!ssid){alert('Please select a network');return;} if (confirm(`Connect to ${ssid}? The device will restart if the connection is successful.`)){document.getElementById('scanStatus').textContent='Connecting...';fetch(`/connect?ssid=${encodeURIComponent(ssid)}&password=${encodeURIComponent(password)}`).then(response=>response.text()).then(data=>{alert(data);document.getElementById('scanStatus').textContent='Connection attempt sent. Please wait for device to restart...';}).catch(error=>{console.error('Error:',error);document.getElementById('scanStatus').textContent='Connection failed';});}}window.onload=function(){fetch('/app.json').then(response=>response.json()).then(data=>{document.getElementById('brightness').value=data.brt;document.getElementById('gmtOffset').value=data.gmtOffset;document.getElementById('imagePath').value=data.img;}).catch(error=>console.error('Error fetching app data:',error));};</script></body></html>)rawliteral";
 
 void handleAppJson() {
     String json = "{";
     json += "\"theme\":" + String(currentTheme) + ",";
     json += "\"brt\":" + String(currentBrightness) + ",";
-    json += "\"img\":\"" + currentImage + "\",";
+    json += "\"img\":\"";
+    json += currentImage;
+    json += "\",";
     json += "\"gmtOffset\":" + String(appSettings.gmtOffset);
     json += "}";
     server.send(200, "application/json", json);
@@ -308,11 +70,13 @@ void handleSet() {
     }
 
     if (server.hasArg("img")) {
-        currentImage = server.arg("img");
-        displayState.imagePath = currentImage;
+        strncpy(currentImage, server.arg("img").c_str(), sizeof(currentImage));
+        currentImage[sizeof(currentImage) - 1] = '\0'; // Ensure null-termination
+        strncpy(displayState.imagePath, currentImage, sizeof(displayState.imagePath));
+        displayState.imagePath[sizeof(displayState.imagePath) - 1] = '\0'; // Ensure null-termination
         displayState.showImage = true;
         displayUpdate();
-        strncpy(appSettings.lastImage, currentImage.c_str(), 63);
+        strncpy(appSettings.lastImage, currentImage, sizeof(appSettings.lastImage)); // Use sizeof for appSettings.lastImage
         settingsSave(appSettings);
         updated = true;
     }
@@ -353,7 +117,7 @@ void handleFileUpload() {
         uploadFile = LittleFS.open(filepath, "w");
 
         if (!uploadFile) {
-            Serial.println("Failed to open file for writing");
+            Serial.println(F("Failed to open file for writing"));
             logPrintf("ERROR: Failed to open file %s for writing!", filepath.c_str());
         } else {
             logPrintf("INFO: Opened file %s for writing.", filepath.c_str());
@@ -417,11 +181,12 @@ void handleApiUpdate() {
         deserializeJson(doc, body);
 
         // line1 from API now goes to displayState.line2 for custom messages
-        if (doc.containsKey("line1")) {
-            displayState.line2 = doc["line1"].as<String>();
+        if (!doc["line1"].isNull()) {
+            strncpy(displayState.line2, doc["line1"].as<const char*>(), sizeof(displayState.line2));
+            displayState.line2[sizeof(displayState.line2) - 1] = '\0'; // Ensure null-termination
         } else {
             // If line1 is not provided, clear the custom message
-            displayState.line2 = "";
+            displayState.line2[0] = '\0';
         }
         
         // Clear other fields as they are not used in simplified clock mode
@@ -441,7 +206,7 @@ void handleReconfigureWiFi() {
 
     // Set failsafe mode and display AP credentials on screen
     wifiFailsafeMode = true;
-    displayShowMessage("AP Mode\n\nSSID:\n" + String(WIFI_AP_NAME) + "\n\nPassword:\n" + apPassword);
+    displayShowAPScreen(WIFI_AP_NAME, apPassword.c_str(), WiFi.softAPIP().toString().c_str());
     delay(1000); // Give time for display update
 
     wifiManager.startConfigPortal(WIFI_AP_NAME, apPassword.c_str()); // Restart into AP mode with random password
@@ -460,21 +225,21 @@ void handleFactoryReset() {
     server.send(200, "text/plain", "Factory Reset triggered. Clearing data and restarting...");
     delay(100); // Give time for response to send
 
-    logPrint("Performing factory reset...");
+    logPrint(F("Performing factory reset..."));
 
     // Clear WiFi credentials FIRST (most important)
-    logPrint("Clearing WiFi credentials...");
+    logPrint(F("Clearing WiFi credentials..."));
     WiFi.disconnect(true);  // Disconnect and erase WiFi credentials
     delay(100);
 
     // Use WiFiManager to reset settings (clears WiFi config sector)
     wifiManager.resetSettings();
-    logPrint("WiFiManager settings cleared.");
+    logPrint(F("WiFiManager settings cleared."));
     delay(100);
 
     // Also erase ESP8266 WiFi config sector for complete wipe
     ESP.eraseConfig();
-    logPrint("ESP WiFi config erased.");
+    logPrint(F("ESP WiFi config erased."));
     delay(100);
 
     // Clear EEPROM settings (our custom settings)
@@ -482,18 +247,18 @@ void handleFactoryReset() {
     Settings defaultSettings;
     settingsReset(defaultSettings);  // Use the proper reset function
     settingsSave(defaultSettings);
-    logPrint("EEPROM settings cleared/reset.");
+    logPrint(F("EEPROM settings cleared/reset."));
 
     // Clear boot counter
     bootCounterReset();
-    logPrint("Boot counter reset.");
+    logPrint(F("Boot counter reset."));
 
     // Format LittleFS (delete all files)
-    logPrint("Formatting LittleFS...");
+    logPrint(F("Formatting LittleFS..."));
     LittleFS.format();
-    logPrint("LittleFS formatted.");
+    logPrint(F("LittleFS formatted."));
 
-    logPrint("Factory reset complete. Restarting...");
+    logPrint(F("Factory reset complete. Restarting..."));
     delay(1000);
 
     ESP.restart(); // Restart the device
@@ -554,7 +319,7 @@ void handleLog() {
 }
 
 void handleWiFiScan() {
-    logPrint("Starting WiFi scan...");
+    logPrint(F("Starting WiFi scan..."));
 
     // Scan for networks (async scan to avoid blocking AP mode)
     int numNetworks = WiFi.scanNetworks(false, true); // async=false, show_hidden=true
@@ -623,8 +388,12 @@ void handleWiFiConnect() {
         // Restart AP mode
         WiFi.mode(WIFI_AP);
         WiFi.softAP(WIFI_AP_NAME, apPassword.c_str());
-        logPrint("Connection failed, AP mode restarted");
+        logPrint(F("Connection failed, AP mode restarted"));
     }
+}
+
+void handleRoot() {
+    server.send(200, "text/html", index_html);
 }
 
 void webserverInit() {
@@ -651,8 +420,10 @@ void webserverInit() {
     server.on("/update", HTTP_GET, handleOTAForm);
     server.on("/update", HTTP_POST, handleOTADone, handleOTAUpload);
 
+    currentImage[0] = '\0'; // Initialize currentImage as empty
+
     server.begin();
-    Serial.println("Web server started");
+    Serial.println(F("Web server started"));
 }
 
 void webserverHandle() {

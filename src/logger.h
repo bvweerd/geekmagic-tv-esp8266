@@ -3,7 +3,7 @@
 
 #include <Arduino.h>
 
-#define LOG_BUFFER_SIZE 50
+#define LOG_BUFFER_SIZE 20
 #define LOG_LINE_LENGTH 128
 
 void loggerInit();

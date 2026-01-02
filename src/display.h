@@ -4,15 +4,22 @@
 #include <Arduino.h>
 #include <TFT_eSPI.h>
 
+// Define buffer sizes for DisplayState char arrays
+#define DISPLAY_LINE_BUFFER_SIZE 64
+#define DISPLAY_IP_BUFFER_SIZE 24
+#define DISPLAY_PATH_BUFFER_SIZE 64
+#define DISPLAY_SSID_BUFFER_SIZE 36
+#define DISPLAY_PASS_BUFFER_SIZE 16
+
 struct DisplayState {
-    String line1;       // Used for NTP time
-    String line2;       // Used for custom messages
-    String ipInfo;      // IP address or network info to show at top
+    char line1[16];       // Used for NTP time
+    char line2[DISPLAY_LINE_BUFFER_SIZE];       // Used for custom messages
+    char ipInfo[DISPLAY_IP_BUFFER_SIZE];      // IP address or network info to show at top
     bool showImage;     // True if an image is currently displayed
-    String imagePath;   // Path to the image file
+    char imagePath[DISPLAY_PATH_BUFFER_SIZE];   // Path to the image file
     bool apMode;        // True when showing AP mode credentials screen
-    String apSSID;      // AP mode SSID to display
-    String apPassword;  // AP mode password to display
+    char apSSID[DISPLAY_SSID_BUFFER_SIZE];      // AP mode SSID to display
+    char apPassword[DISPLAY_PASS_BUFFER_SIZE];  // AP mode password to display
 };
 
 void displayInit();
@@ -20,8 +27,9 @@ void displaySetBrightness(int brightness);
 void displayUpdate();
 void displayRenderClock();
 void displayRenderAPMode();
-void displayRenderImage(const String &path);
+void displayRenderImage(const char *path);
 void displayShowMessage(const String &msg);
+void displayShowAPScreen(const char* ssid, const char* password, const char* ip);
 
 extern DisplayState displayState;
 extern TFT_eSPI tft;

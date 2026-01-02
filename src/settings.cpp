@@ -56,12 +56,12 @@ bool settingsValidate(const Settings &settings) {
 
     // Sanity checks on values
     if (settings.brightness < 0 || settings.brightness > 100) {
-        Serial.println("Settings brightness out of range");
+        Serial.println(F("Settings brightness out of range"));
         return false;
     }
 
     if (settings.theme < 0 || settings.theme > 10) {
-        Serial.println("Settings theme out of range");
+        Serial.println(F("Settings theme out of range"));
         return false;
     }
 
@@ -70,7 +70,7 @@ bool settingsValidate(const Settings &settings) {
 
 // Reset settings to factory defaults
 void settingsReset(Settings &settings) {
-    Serial.println("Resetting settings to factory defaults");
+    Serial.println(F("Resetting settings to factory defaults"));
 
     settings.version = FIRMWARE_VERSION;
     settings.brightness = 70;
@@ -90,14 +90,14 @@ void settingsLoad(Settings &settings) {
 
         // Validate loaded settings
         if (!settingsValidate(settings)) {
-            Serial.println("Settings validation failed - resetting to defaults");
+            Serial.println(F("Settings validation failed - resetting to defaults"));
             settingsReset(settings);
             settingsSave(settings);  // Save valid defaults
         } else {
-            Serial.println("Settings loaded and validated successfully");
+            Serial.println(F("Settings loaded and validated successfully"));
         }
     } else {
-        Serial.println("No valid settings found - initializing defaults");
+        Serial.println(F("No valid settings found - initializing defaults"));
         settingsReset(settings);
         settingsSave(settings);  // Save defaults on first boot
     }
@@ -113,7 +113,7 @@ void settingsSave(const Settings &settings) {
     EEPROM.put(SETTINGS_ADDR + 2, tempSettings);
     EEPROM.commit();
 
-    Serial.println("Settings saved with CRC validation");
+    Serial.println(F("Settings saved with CRC validation"));
 }
 
 // Boot counter functions for failure detection
@@ -168,7 +168,7 @@ void bootCounterReset() {
     EEPROM.put(BOOT_COUNTER_ADDR, counter);
     EEPROM.commit();
 
-    Serial.println("Boot counter reset - successful boot");
+    Serial.println(F("Boot counter reset - successful boot"));
 }
 
 bool bootCounterCheckFailsafe() {
@@ -231,7 +231,7 @@ void powerCycleCounterReset() {
     EEPROM.put(POWER_CYCLE_COUNTER_ADDR, counter);
     EEPROM.commit();
 
-    Serial.println("Power cycle counter reset");
+    Serial.println(F("Power cycle counter reset"));
 }
 
 bool powerCycleCounterCheckReset() {
