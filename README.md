@@ -4,12 +4,7 @@ ESP8266 SmartClock with GeekMagic API compatibility.
 
 ## ⚠️ OTA Update Safety
 
-This firmware implements **robust OTA update protection** with multiple failsafe mechanisms:
-- ✅ Automatic EEPROM validation with CRC32 checksums
-- ✅ Boot failure detection and automatic recovery
-- ✅ WiFi connection retry with exponential backoff
-- ✅ Automatic fallback to AP mode when WiFi fails
-- ✅ Emergency EEPROM reset after repeated boot failures
+This firmware implements **robust OTA update protection** with multiple failsafe mechanisms.
 
 **While OTA updates are now significantly safer, always keep a USB cable available for emergency recovery via UART if needed.**
 
