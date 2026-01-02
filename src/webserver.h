@@ -4,6 +4,7 @@
 #include <ESP8266WebServer.h>
 #include <NTPClient.h> // Include for NTPClient access
 #include <WiFiManager.h> // Include for WiFiManager access
+#include "display.h" // Include for display functions
 
 void webserverInit();
 void webserverHandle();
@@ -14,5 +15,7 @@ extern int currentTheme;
 extern String currentImage;
 extern NTPClient timeClient; // Declare NTPClient object as extern
 extern WiFiManager wifiManager; // Declare WiFiManager object as extern
+extern String apPassword; // Random AP password generated at runtime
+extern bool wifiFailsafeMode; // WiFi failsafe mode flag
 
 #endif

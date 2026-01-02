@@ -121,6 +121,7 @@ void displayInit() {
 
     displayState.line1 = "00:00";
     displayState.line2 = ""; // Initialize custom message line as empty
+    displayState.ipInfo = ""; // Initialize IP info as empty
     displayState.showImage = false;
     displayState.imagePath = "";
 
@@ -181,6 +182,23 @@ void displayRenderClock() {
 
     tft.fillScreen(TFT_BLACK);
 
+    int currentY = 5; // Start from top with small margin
+
+    // Display IP Info at the top (small font)
+    if (!displayState.ipInfo.isEmpty()) {
+        tft.setTextColor(TFT_DARKGREY, TFT_BLACK);
+        tft.setTextDatum(TC_DATUM);
+        int ipFont = 1; // Small font
+        tft.setTextFont(ipFont);
+        int ipLineHeight = tft.fontHeight();
+        std::vector<String> ipWrappedLines = wrapText(displayState.ipInfo, ipFont, tft.width() - 10);
+
+        for (int i = 0; i < ipWrappedLines.size(); i++) {
+            tft.drawString(ipWrappedLines[i], tft.width() / 2, currentY + (i * ipLineHeight), ipFont);
+        }
+        currentY += ipWrappedLines.size() * ipLineHeight + 10; // Add spacing after IP
+    }
+
     // Display Time (displayState.line1) - Centered
     tft.setTextColor(TFT_WHITE, TFT_BLACK);
     tft.setTextDatum(TC_DATUM);
@@ -188,30 +206,40 @@ void displayRenderClock() {
     tft.setTextFont(timeFont);
     int timeLineHeight = tft.fontHeight();
     std::vector<String> timeWrappedLines = wrapText(displayState.line1, timeFont, tft.width());
-    
-    // Initial Y for time block, adjusted for multiple lines and vertical centering
+
+    // Calculate remaining space and center time vertically in it
+    int remainingHeight = tft.height() - currentY;
     int totalTextHeight = timeWrappedLines.size() * timeLineHeight;
-    int currentY = (tft.height() / 2) - (totalTextHeight / 2);
+
+    // Add date height to calculation
+    String currentDate = getFormattedDate();
+    int dateFont = 4;
+    tft.setTextFont(dateFont);
+    int dateLineHeight = tft.fontHeight();
+    std::vector<String> dateWrappedLines = wrapText(currentDate, dateFont, tft.width());
+    int totalDateHeight = dateWrappedLines.size() * dateLineHeight;
+
+    // Center the time+date block in remaining space
+    int timeBlockHeight = totalTextHeight + (timeLineHeight / 2) + totalDateHeight;
+    currentY += (remainingHeight - timeBlockHeight) / 2;
+
+    // Draw time
+    tft.setTextFont(timeFont);
 
     for (int i = 0; i < timeWrappedLines.size(); i++) {
         tft.drawString(timeWrappedLines[i], tft.width() / 2, currentY + (i * timeLineHeight), timeFont);
     }
     currentY += totalTextHeight; // Move Y past the time block
 
-    // Display Date (getFormattedDate()) - Centered, below time
-    String currentDate = getFormattedDate();
-    int dateFont = 4;
-    tft.setTextFont(dateFont);
-    int dateLineHeight = tft.fontHeight();
-    std::vector<String> dateWrappedLines = wrapText(currentDate, dateFont, tft.width());
-
     // Add some padding between time and date
-    currentY += dateLineHeight / 2; // Roughly half a line height padding
+    currentY += timeLineHeight / 2; // Roughly half a line height padding
 
+    // Display Date (getFormattedDate()) - Centered, below time
+    tft.setTextFont(dateFont);
     for (int i = 0; i < dateWrappedLines.size(); i++) {
         tft.drawString(dateWrappedLines[i], tft.width() / 2, currentY + (i * dateLineHeight), dateFont);
     }
-    currentY += dateWrappedLines.size() * dateLineHeight; // Move Y past the date block
+    currentY += totalDateHeight; // Move Y past the date block
 
     // Display Custom Message (displayState.line2) - Centered, below date
     if (!displayState.line2.isEmpty()) {
