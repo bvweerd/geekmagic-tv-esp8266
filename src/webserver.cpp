@@ -359,7 +359,20 @@ void handleApiUpdate() {
 void handleReconfigureWiFi() {
     server.send(200, "text/plain", "WiFi Reconfiguration triggered. Device restarting to AP mode.");
     delay(100); // Give time for response to send
+
+    // Set failsafe mode and display AP credentials on screen
+    wifiFailsafeMode = true;
+    displayShowMessage("AP Mode\nSSID: " + String(WIFI_AP_NAME) + "\nPass: " + apPassword);
+    delay(1000); // Give time for display update
+
     wifiManager.startConfigPortal(WIFI_AP_NAME, apPassword.c_str()); // Restart into AP mode with random password
+
+    // After config portal exits, check if connected
+    if (WiFi.status() == WL_CONNECTED) {
+        wifiFailsafeMode = false;
+        displayShowMessage("WiFi OK\n" + WiFi.localIP().toString());
+        delay(2000);
+    }
     // ESP.restart(); // WiFiManager.startConfigPortal() usually reboots itself
 }
 
