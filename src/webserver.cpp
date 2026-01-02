@@ -103,6 +103,7 @@ const char* index_html = R"rawliteral(
 
         <div class="section">
             <h2>Advanced</h2>
+            <p><a href="/update" class="button">Firmware Update (OTA)</a></p>
             <p><a href="#" class="button red" onclick="factoryReset()">Factory Reset</a></p>
         </div>
     </div>
