@@ -359,7 +359,7 @@ void handleApiUpdate() {
 void handleReconfigureWiFi() {
     server.send(200, "text/plain", "WiFi Reconfiguration triggered. Device restarting to AP mode.");
     delay(100); // Give time for response to send
-    wifiManager.startConfigPortal(WIFI_AP_NAME, WIFI_AP_PASSWORD); // Restart into AP mode
+    wifiManager.startConfigPortal(WIFI_AP_NAME, apPassword.c_str()); // Restart into AP mode with random password
     // ESP.restart(); // WiFiManager.startConfigPortal() usually reboots itself
 }
 

@@ -14,5 +14,6 @@ extern int currentTheme;
 extern String currentImage;
 extern NTPClient timeClient; // Declare NTPClient object as extern
 extern WiFiManager wifiManager; // Declare WiFiManager object as extern
+extern String apPassword; // Random AP password generated at runtime
 
 #endif
