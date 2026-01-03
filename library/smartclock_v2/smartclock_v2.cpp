@@ -329,7 +329,6 @@ void SmartClockV2Component::setup_handlers() {
   server->on(
       "/doUpload", HTTP_POST,
       [this](AsyncWebServerRequest *request) {
-        ESP_LOGI(TAG, "Upload complete: %s", this->upload_filename_.c_str());
         request->send(200, "text/plain", "OK");
       },
       [this](AsyncWebServerRequest *request, String filename, size_t index, uint8_t *data, size_t len,
@@ -338,6 +337,7 @@ void SmartClockV2Component::setup_handlers() {
         if (index == 0) {
           this->upload_filename_ = filename;
           String filepath = "/image/" + filename;
+
           ESP_LOGI(TAG, "Upload start: %s", filename.c_str());
 
           this->upload_file_ = LittleFS.open(filepath, "w");
@@ -360,8 +360,6 @@ void SmartClockV2Component::setup_handlers() {
             File f = LittleFS.open("/image/" + filename, "r");
             if (f) {
               ESP_LOGI(TAG, "Verified file size: %u bytes", f.size());
-              this->log("Upload complete: " + std::string(filename.c_str()) +
-                       " (" + std::to_string(f.size()) + " bytes)");
               f.close();
             }
           }
