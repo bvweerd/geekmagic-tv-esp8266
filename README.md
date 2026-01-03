@@ -8,8 +8,9 @@ The Smalltv and Smalltv-Ultra are based on an ESP8266, while the Smalltv-Pro use
 This code has only been tested on the Smalltv Ultra (ESP8266) and may require modifications for other variants.
 
 ## ⚠️ Flash wear
-Updating images frequently will wear out flash really fast. The ESP8266 has around 100.000 write cycles. So updating every 10 seconds will wear out your flash in 7 days! Saving images in RAM is currently not supported, since it has not enough RAM...
 
+Updating images frequently will wear out flash fast. Think about your update settings. The reserved space for the filesystem is 1MB.
+ 
 ## ⚠️ OTA Update Safety
 
 This firmware implements **robust OTA update protection** with multiple failsafe mechanisms.
