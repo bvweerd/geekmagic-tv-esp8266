@@ -1,6 +1,7 @@
 #include "smartclock_v2.h"
 #include "esphome/core/log.h"
 #include "esphome/core/application.h"
+#include "esphome/core/helpers.h"
 #include <ArduinoJson.h>
 
 #ifdef USE_ESP8266
@@ -8,19 +9,40 @@
 #include <LittleFS.h>
 #endif
 
+// Include TJpg_Decoder only in .cpp to avoid SD.h dependency issues in header
+#include <TJpg_Decoder.h>
+
 namespace esphome {
 namespace smartclock_v2 {
 
 static const char *const TAG = "smartclock_v2";
 
+// Static instance pointer voor TJpgDec callback
+SmartClockV2Component *SmartClockV2Component::instance_ = nullptr;
+
 void SmartClockV2Component::setup() {
-  ESP_LOGCONFIG(TAG, "Setting up SmartClock V2 (AsyncWebServer test)...");
+  ESP_LOGCONFIG(TAG, "Setting up SmartClock V2...");
+
+  // Set static instance pointer for TJpgDec callback
+  instance_ = this;
+
+  // Initialize TJpgDec
+  TJpgDec.setJpgScale(1);
+  TJpgDec.setSwapBytes(true);
+  TJpgDec.setCallback(SmartClockV2Component::tjpg_output_callback);
+  ESP_LOGI(TAG, "TJpgDec initialized");
 
 #ifdef USE_ESP8266
   // Initialize LittleFS
   if (!LittleFS.begin()) {
-    ESP_LOGE(TAG, "LittleFS mount failed!");
-    this->mark_failed();
+    ESP_LOGW(TAG, "LittleFS mount failed. Formatting LittleFS...");
+
+    // Format LittleFS if mounting fails (just like original code)
+    LittleFS.format();
+    ESP_LOGI(TAG, "LittleFS formatted. Restarting...");
+
+    delay(3000);
+    App.safe_reboot();
     return;
   }
   ESP_LOGI(TAG, "LittleFS mounted successfully");
@@ -31,7 +53,7 @@ void SmartClockV2Component::setup() {
     ESP_LOGI(TAG, "Created /image directory");
   }
 
-  // Clear existing images (temporary storage)
+  // Clear existing images (temporary storage like original)
   Dir dir = LittleFS.openDir("/image");
   int cleared = 0;
   while (dir.next()) {
@@ -44,6 +66,21 @@ void SmartClockV2Component::setup() {
     ESP_LOGI(TAG, "Cleared %d temporary image(s)", cleared);
   }
 #endif
+
+  // Load settings from flash
+  // Use a fixed hash for the preferences storage
+  this->pref_ = global_preferences->make_preference<SmartClockSettings>(fnv1_hash("smartclock_v2_settings"));
+  this->load_settings();
+
+  // Apply saved brightness to backlight (defer to after components are ready)
+  this->defer([this]() {
+    if (this->backlight_ != nullptr) {
+      ESP_LOGI(TAG, "Applying saved brightness: %d", this->settings_.brightness);
+      auto call = this->backlight_->make_call();
+      call.set_brightness(this->settings_.brightness / 100.0f);
+      call.perform();
+    }
+  });
 
   // Get the global web server base
   auto *server = web_server_base::global_web_server_base;
@@ -59,69 +96,188 @@ void SmartClockV2Component::setup() {
   ESP_LOGCONFIG(TAG, "SmartClock V2 setup complete");
 }
 
+void SmartClockV2Component::load_settings() {
+  if (!this->pref_.load(&this->settings_)) {
+    ESP_LOGI(TAG, "No saved settings, using defaults");
+  } else {
+    ESP_LOGI(TAG, "Loaded settings: brightness=%d, theme=%d, gmt_offset=%d",
+             this->settings_.brightness, this->settings_.theme, this->settings_.gmt_offset);
+  }
+}
+
+void SmartClockV2Component::save_settings() {
+  this->pref_.save(&this->settings_);
+  ESP_LOGD(TAG, "Settings saved");
+}
+
+void SmartClockV2Component::log(const std::string &message) {
+  // Add to circular log buffer
+  if (this->log_buffer_.size() >= MAX_LOG_ENTRIES) {
+    this->log_buffer_.erase(this->log_buffer_.begin());
+  }
+  this->log_buffer_.push_back(message);
+  ESP_LOGI(TAG, "%s", message.c_str());
+}
+
+void SmartClockV2Component::set_brightness(int brightness) {
+  brightness = std::max(0, std::min(100, brightness));  // Constrain 0-100
+  this->settings_.brightness = brightness;
+  this->save_settings();
+
+  // Update the actual light entity if available
+  if (this->backlight_ != nullptr) {
+    auto call = this->backlight_->make_call();
+    call.set_brightness(brightness / 100.0f);
+    call.perform();
+  }
+
+  this->log("Brightness set to " + std::to_string(brightness));
+}
+
+void SmartClockV2Component::set_image_path(const std::string &path) {
+  strncpy(this->settings_.image_path, path.c_str(), sizeof(this->settings_.image_path) - 1);
+  this->settings_.image_path[sizeof(this->settings_.image_path) - 1] = '\0';
+  this->show_image_ = true;
+  this->image_decoded_ = false;  // Reset flag to force re-decode
+  this->save_settings();
+
+  // Trigger display update
+  if (this->update_callback_) {
+    this->update_callback_();
+  }
+
+  this->log("Image path set to: " + path);
+}
+
 void SmartClockV2Component::setup_handlers() {
   auto *server = web_server_base::global_web_server_base->get_server();
 
-  // Test handler: Simple GET endpoint
-  server->on("/test", HTTP_GET, [](AsyncWebServerRequest *request) {
-    ESP_LOGI(TAG, "Test endpoint called!");
-    request->send(200, "text/plain", "SmartClock V2 - AsyncWebServer works!");
+  // GET /app.json - App status (like original webserver.cpp)
+  server->on("/app.json", HTTP_GET, [this](AsyncWebServerRequest *request) {
+    JsonDocument doc;
+    doc["theme"] = this->settings_.theme;
+    doc["brt"] = this->settings_.brightness;
+    doc["img"] = this->settings_.image_path;
+    doc["gmtOffset"] = this->settings_.gmt_offset;
+
+    String response;
+    serializeJson(doc, response);
+    request->send(200, "application/json", response);
   });
 
-  // File upload handler with multipart support (/doUpload voor backwards compatibility)
-  server->on(
-      "/doUpload", HTTP_POST,
-      // Request handler (after upload completes)
-      [this](AsyncWebServerRequest *request) {
-        ESP_LOGI(TAG, "Upload complete: %s", this->upload_filename_.c_str());
-        request->send(200, "text/plain", "OK");
-      },
-      // Upload handler (during upload)
-      [this](AsyncWebServerRequest *request, String filename, size_t index, uint8_t *data, size_t len,
-         bool final) {
+  // GET /space.json - LittleFS storage info
+  server->on("/space.json", HTTP_GET, [this](AsyncWebServerRequest *request) {
 #ifdef USE_ESP8266
-        if (index == 0) {
-          // Start of upload
-          this->upload_filename_ = filename;
-          String filepath = "/image/" + filename;
+    FSInfo fs_info;
+    LittleFS.info(fs_info);
 
-          ESP_LOGI(TAG, "Upload start: %s", filename.c_str());
+    JsonDocument doc;
+    doc["total"] = fs_info.totalBytes;
+    doc["free"] = fs_info.totalBytes - fs_info.usedBytes;
 
-          // Open file for writing
-          this->upload_file_ = LittleFS.open(filepath, "w");
-          if (!this->upload_file_) {
-            ESP_LOGE(TAG, "Failed to open file for writing: %s", filepath.c_str());
-            return;
-          }
-        }
-
-        // Write chunk to file
-        if (this->upload_file_) {
-          size_t written = this->upload_file_.write(data, len);
-          if (written != len) {
-            ESP_LOGW(TAG, "Only wrote %u of %u bytes", written, len);
-          }
-        }
-
-        if (final) {
-          // End of upload
-          if (this->upload_file_) {
-            this->upload_file_.close();
-            ESP_LOGI(TAG, "Upload finished: %s, total size=%u bytes",
-                     filename.c_str(), index + len);
-
-            // Verify file was written
-            File f = LittleFS.open("/image/" + filename, "r");
-            if (f) {
-              ESP_LOGI(TAG, "Verified file size: %u bytes", f.size());
-              f.close();
-            }
-          }
-        }
+    String response;
+    serializeJson(doc, response);
+    request->send(200, "application/json", response);
+#else
+    request->send(501, "text/plain", "Not implemented on this platform");
 #endif
-      });
+  });
 
-  // API update handler with JSON body (/api/update voor live display updates)
+  // GET /brt.json - Brightness info
+  server->on("/brt.json", HTTP_GET, [this](AsyncWebServerRequest *request) {
+    JsonDocument doc;
+    doc["brt"] = this->settings_.brightness;
+
+    String response;
+    serializeJson(doc, response);
+    request->send(200, "application/json", response);
+  });
+
+  // GET /set - Set parameters (brt, img, gmt, theme, clear)
+  server->on("/set", HTTP_GET, [this](AsyncWebServerRequest *request) {
+    bool updated = false;
+
+    // Set brightness
+    if (request->hasParam("brt")) {
+      int brightness = request->getParam("brt")->value().toInt();
+      this->set_brightness(brightness);
+      updated = true;
+    }
+
+    // Set theme
+    if (request->hasParam("theme")) {
+      int theme = request->getParam("theme")->value().toInt();
+      this->settings_.theme = theme;
+      this->save_settings();
+      updated = true;
+    }
+
+    // Set image path
+    if (request->hasParam("img")) {
+      String img_path = request->getParam("img")->value();
+      this->set_image_path(img_path.c_str());
+      updated = true;
+    }
+
+    // Set GMT offset
+    if (request->hasParam("gmt")) {
+      int32_t gmt = request->getParam("gmt")->value().toInt();
+      this->set_gmt_offset(gmt);
+      updated = true;
+    }
+
+    // Clear images
+    if (request->hasParam("clear")) {
+      String clear_type = request->getParam("clear")->value();
+      if (clear_type == "image") {
+#ifdef USE_ESP8266
+        Dir dir = LittleFS.openDir("/image");
+        int cleared = 0;
+        while (dir.next()) {
+          String path = "/image/" + dir.fileName();
+          if (LittleFS.remove(path)) {
+            cleared++;
+          }
+        }
+        this->log("Cleared " + std::to_string(cleared) + " image(s)");
+        updated = true;
+#endif
+      }
+    }
+
+    request->send(200, "text/plain", updated ? "OK" : "No action");
+  });
+
+  // GET /delete - Delete specific file
+  server->on("/delete", HTTP_GET, [this](AsyncWebServerRequest *request) {
+    if (request->hasParam("file")) {
+#ifdef USE_ESP8266
+      String filepath = request->getParam("file")->value();
+      if (LittleFS.remove(filepath)) {
+        this->log("Deleted file: " + std::string(filepath.c_str()));
+        request->send(200, "text/plain", "Deleted");
+      } else {
+        request->send(404, "text/plain", "Not found");
+      }
+#else
+      request->send(501, "text/plain", "Not implemented");
+#endif
+    } else {
+      request->send(400, "text/plain", "Missing file parameter");
+    }
+  });
+
+  // GET /log - View logs
+  server->on("/log", HTTP_GET, [this](AsyncWebServerRequest *request) {
+    String log_output = "";
+    for (const auto &entry : this->log_buffer_) {
+      log_output += entry.c_str();
+      log_output += "\n";
+    }
+    request->send(200, "text/plain", log_output);
+  });
+
+  // POST /api/update - JSON API update (for display updates)
   server->on("/api/update", HTTP_POST, [this](AsyncWebServerRequest *request) {}, nullptr,
              [this](AsyncWebServerRequest *request, uint8_t *data, size_t len, size_t index, size_t total) {
                // Parse JSON body
@@ -134,37 +290,17 @@ void SmartClockV2Component::setup_handlers() {
                  return;
                }
 
-               ESP_LOGI(TAG, "API update received");
-
-               // Update state from JSON fields
+               // Update custom message (line1 from API -> custom_message_)
                if (!doc["line1"].isNull()) {
-                 this->line_1_ = doc["line1"].as<std::string>();
-                 ESP_LOGI(TAG, "  line1: %s", this->line_1_.c_str());
+                 this->custom_message_ = doc["line1"].as<std::string>();
+                 ESP_LOGD(TAG, "Custom message: %s", this->custom_message_.c_str());
+               } else {
+                 this->custom_message_ = "";
                }
-               if (!doc["line2"].isNull()) {
-                 this->line_2_ = doc["line2"].as<std::string>();
-                 ESP_LOGI(TAG, "  line2: %s", this->line_2_.c_str());
-               }
-               if (!doc["line3"].isNull()) {
-                 this->line_3_ = doc["line3"].as<std::string>();
-               }
-               if (!doc["line4"].isNull()) {
-                 this->line_4_ = doc["line4"].as<std::string>();
-               }
-               if (!doc["line5"].isNull()) {
-                 this->line_5_ = doc["line5"].as<std::string>();
-               }
-               if (!doc["line6"].isNull()) {
-                 this->line_6_ = doc["line6"].as<std::string>();
-               }
-               if (!doc["media"].isNull()) {
-                 this->line_media_ = doc["media"].as<std::string>();
-                 ESP_LOGI(TAG, "  media: %s", this->line_media_.c_str());
-               }
-               if (!doc["bar"].isNull()) {
-                 this->bar_value_ = doc["bar"].as<float>();
-                 ESP_LOGI(TAG, "  bar: %.2f", this->bar_value_);
-               }
+
+               // Clear image display when API update is received
+               this->show_image_ = false;
+               this->image_decoded_ = false;  // Reset decoded flag
 
                // Trigger display update via callback
                if (this->update_callback_) {
@@ -174,49 +310,176 @@ void SmartClockV2Component::setup_handlers() {
                request->send(200, "application/json", "{\"status\":\"ok\"}");
              });
 
-  // GET endpoint for status
+  // GET /api/status - Get current status
   server->on("/api/status", HTTP_GET, [this](AsyncWebServerRequest *request) {
     JsonDocument doc;
-    doc["line1"] = this->line_1_;
-    doc["line2"] = this->line_2_;
-    doc["line3"] = this->line_3_;
-    doc["line4"] = this->line_4_;
-    doc["line5"] = this->line_5_;
-    doc["line6"] = this->line_6_;
-    doc["media"] = this->line_media_;
-    doc["bar"] = this->bar_value_;
+    doc["time"] = this->time_string_;
+    doc["message"] = this->custom_message_;
+    doc["image"] = this->settings_.image_path;
+    doc["show_image"] = this->show_image_;
+    doc["brightness"] = this->settings_.brightness;
+    doc["gmt_offset"] = this->settings_.gmt_offset;
 
     String response;
     serializeJson(doc, response);
     request->send(200, "application/json", response);
   });
 
-  ESP_LOGI(TAG, "Handlers registered on AsyncWebServer");
+  // File upload handler (/doUpload for backwards compatibility)
+  server->on(
+      "/doUpload", HTTP_POST,
+      [this](AsyncWebServerRequest *request) {
+        ESP_LOGI(TAG, "Upload complete: %s", this->upload_filename_.c_str());
+        request->send(200, "text/plain", "OK");
+      },
+      [this](AsyncWebServerRequest *request, String filename, size_t index, uint8_t *data, size_t len,
+         bool final) {
+#ifdef USE_ESP8266
+        if (index == 0) {
+          this->upload_filename_ = filename;
+          String filepath = "/image/" + filename;
+          ESP_LOGI(TAG, "Upload start: %s", filename.c_str());
+
+          this->upload_file_ = LittleFS.open(filepath, "w");
+          if (!this->upload_file_) {
+            ESP_LOGE(TAG, "Failed to open file for writing: %s", filepath.c_str());
+            return;
+          }
+        }
+
+        if (this->upload_file_) {
+          this->upload_file_.write(data, len);
+        }
+
+        if (final) {
+          if (this->upload_file_) {
+            this->upload_file_.close();
+            ESP_LOGI(TAG, "Upload finished: %s, total size=%u bytes",
+                     filename.c_str(), index + len);
+
+            File f = LittleFS.open("/image/" + filename, "r");
+            if (f) {
+              ESP_LOGI(TAG, "Verified file size: %u bytes", f.size());
+              this->log("Upload complete: " + std::string(filename.c_str()) +
+                       " (" + std::to_string(f.size()) + " bytes)");
+              f.close();
+            }
+          }
+        }
+#endif
+      });
+
+  ESP_LOGI(TAG, "API endpoints registered");
 }
 
 void SmartClockV2Component::loop() {
-  // Scroll animation (30ms interval like in original YAML)
-  uint32_t now = millis();
-  if (now - this->last_scroll_ >= 30) {
-    this->last_scroll_ = now;
-    this->scroll_pos_ -= 3;
-    if (this->scroll_pos_ < -400) {
-      this->scroll_pos_ = 240;
-    }
-
-    // Trigger display update via callback if set
-    if (this->update_callback_) {
-      this->update_callback_();
-    }
-  }
+  // No scroll animation needed for simple clock display
+  // Time updates will come from YAML time component
 }
 
 void SmartClockV2Component::dump_config() {
   ESP_LOGCONFIG(TAG, "SmartClock V2:");
-  ESP_LOGCONFIG(TAG, "  AsyncWebServer integration: YES");
-  ESP_LOGCONFIG(TAG, "  Test endpoint: http://smartclock.local/test");
-  ESP_LOGCONFIG(TAG, "  Upload endpoint: http://smartclock.local/doUpload");
-  ESP_LOGCONFIG(TAG, "  API endpoint: http://smartclock.local/api/update");
+  ESP_LOGCONFIG(TAG, "  Brightness: %d", this->settings_.brightness);
+  ESP_LOGCONFIG(TAG, "  Theme: %d", this->settings_.theme);
+  ESP_LOGCONFIG(TAG, "  GMT Offset: %d", this->settings_.gmt_offset);
+  ESP_LOGCONFIG(TAG, "  Image Path: %s", this->settings_.image_path);
+  ESP_LOGCONFIG(TAG, "API Endpoints:");
+  ESP_LOGCONFIG(TAG, "  GET  /app.json");
+  ESP_LOGCONFIG(TAG, "  GET  /space.json");
+  ESP_LOGCONFIG(TAG, "  GET  /brt.json");
+  ESP_LOGCONFIG(TAG, "  GET  /set?brt=<0-100>&img=<path>&gmt=<seconds>&clear=image");
+  ESP_LOGCONFIG(TAG, "  GET  /delete?file=<path>");
+  ESP_LOGCONFIG(TAG, "  GET  /log");
+  ESP_LOGCONFIG(TAG, "  POST /api/update (JSON: {\"line1\":\"message\"})");
+  ESP_LOGCONFIG(TAG, "  GET  /api/status");
+  ESP_LOGCONFIG(TAG, "  POST /doUpload");
+}
+
+// TJpgDec callback - called by decoder with chunks of decoded image data
+bool SmartClockV2Component::tjpg_output_callback(int16_t x, int16_t y, uint16_t w, uint16_t h, uint16_t *bitmap) {
+  if (instance_ == nullptr || instance_->display_ == nullptr) {
+    return false;
+  }
+
+  // Push RGB565 pixels to display
+  // Process in chunks and yield to prevent watchdog
+  const uint16_t PIXELS_PER_YIELD = 240;  // Yield every ~1 line on 240px display
+  uint16_t pixel_count = 0;
+
+  for (uint16_t row = 0; row < h; row++) {
+    for (uint16_t col = 0; col < w; col++) {
+      uint16_t pixel = bitmap[row * w + col];
+
+      // Convert RGB565 to RGB888
+      // Note: TJpgDec uses BGR order due to setSwapBytes(true)
+      uint8_t b = ((pixel >> 11) & 0x1F) << 3;  // 5 bits -> 8 bits
+      uint8_t g = ((pixel >> 5) & 0x3F) << 2;   // 6 bits -> 8 bits
+      uint8_t r = (pixel & 0x1F) << 3;          // 5 bits -> 8 bits
+
+      // Color constructor expects RGB, but display needs G and B swapped
+      instance_->display_->draw_pixel_at(x + col, y + row, Color(r, b, g));
+
+      // Yield to watchdog periodically
+      pixel_count++;
+      if (pixel_count >= PIXELS_PER_YIELD) {
+        yield();
+        pixel_count = 0;
+      }
+    }
+  }
+
+  return true;
+}
+
+bool SmartClockV2Component::render_jpeg_image(display::Display &it, const char *path) {
+#ifdef USE_ESP8266
+  if (path == nullptr || strlen(path) == 0) {
+    ESP_LOGW(TAG, "No image path provided");
+    return false;
+  }
+
+  // Check if file exists
+  if (!LittleFS.exists(path)) {
+    ESP_LOGW(TAG, "Image file not found: %s", path);
+    return false;
+  }
+
+  // Open file
+  File jpgFile = LittleFS.open(path, "r");
+  if (!jpgFile) {
+    ESP_LOGE(TAG, "Failed to open image file: %s", path);
+    return false;
+  }
+
+  ESP_LOGI(TAG, "Decoding JPEG: %s (%u bytes)", path, jpgFile.size());
+
+  // Store display reference for callback
+  this->display_ = &it;
+
+  // Feed watchdog before decode
+  ESP.wdtFeed();
+  yield();
+
+  // Decode JPEG from file
+  uint8_t result = TJpgDec.drawFsJpg(0, 0, jpgFile);
+
+  jpgFile.close();
+
+  // Feed watchdog after decode
+  ESP.wdtFeed();
+  yield();
+
+  if (result != 0) {
+    ESP_LOGE(TAG, "JPEG decode failed with error: %u", result);
+    return false;
+  }
+
+  ESP_LOGI(TAG, "JPEG decoded successfully");
+  return true;
+#else
+  ESP_LOGW(TAG, "JPEG rendering only supported on ESP8266");
+  return false;
+#endif
 }
 
 }  // namespace smartclock_v2

@@ -7,13 +7,11 @@ esphome:
       - light.turn_on:
           id: disp_light
           brightness: 70%
-      - lambda: |-
-          id(smartclock_component).set_update_callback([=]() {
-            id(smart_display).update();
-          });
 
 esp8266:
   board: nodemcuv2
+  framework:
+    version: recommended
 
 wifi:
   ssid: !secret wifi_ssid
@@ -34,6 +32,29 @@ api:
 # BELANGRIJK: web_server_base voor AsyncWebServer
 web_server_base:
 
+# Standaard webserver (start de AsyncWebServer)
+web_server:
+  port: 80
+
+# Time component voor de tijd
+time:
+  - platform: homeassistant
+    id: ha_time
+    on_time:
+      - seconds: /1
+        then:
+          - lambda: |-
+              // Update tijd elke seconde
+              char time_str[6];
+              auto time_now = id(ha_time).now();
+              snprintf(time_str, sizeof(time_str), "%02d:%02d", time_now.hour, time_now.minute);
+              id(smartclock_component).set_time_string(time_str);
+
+              // Only update display if NOT showing an image
+              if (!id(smartclock_component).get_show_image()) {
+                id(smart_display).update();
+              }
+
 # SmartClock V2 component
 external_components:
   - source:
@@ -43,6 +64,7 @@ external_components:
 
 smartclock_v2:
   id: smartclock_component
+  backlight: disp_light
 
 sensor:
   - platform: wifi_signal
@@ -79,17 +101,17 @@ font:
     size: 48
     glyphs: "0123456789: "
   - file: "gfonts://Roboto"
-    id: font_data
-    size: 19
+    id: font_date
+    size: 24
+    glyphs: "0123456789-/ "
+  - file: "gfonts://Roboto"
+    id: font_message
+    size: 16
     glyphs: "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789.,:-/°%|! "
   - file: "gfonts://Roboto"
     id: font_small
     size: 13
     glyphs: "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789.,:-/°%|! "
-  - file: "gfonts://Material+Icons"
-    id: icon_font
-    size: 26
-    glyphs: ["\ue1ff", "\ue88a", "\ue798", "\ue0f0"]
 
 display:
   - platform: mipi_spi
@@ -106,57 +128,94 @@ display:
     spi_mode: mode3
     auto_clear_enabled: true
     lambda: |-
+      // Simple clock display like original src/display.cpp
       auto c_gray = Color(100, 100, 100);
       auto c_white = Color(255, 255, 255);
-      auto c_yellow = Color(255, 255, 0);
-      auto c_green = Color(0, 255, 0);
+      auto c_darkgray = Color(50, 50, 50);
       auto c_cyan = Color(0, 255, 255);
 
+      // Check if showing image instead of clock
+      bool show_image = id(smartclock_component).get_show_image();
+      auto image_path = id(smartclock_component).get_image_path();
+
+      if (show_image && strlen(image_path.c_str()) > 0) {
+        // IMAGE MODE - Only decode JPEG once, not every update
+        bool image_decoded = id(smartclock_component).get_image_decoded();
+
+        if (!image_decoded) {
+          // Clear screen before first decode
+          it.fill(Color(0, 0, 0));
+
+          // Decode JPEG first time
+          ESP_LOGI("display", "Starting JPEG decode...");
+          bool success = id(smartclock_component).render_jpeg_image(it, image_path.c_str());
+          if (success) {
+            id(smartclock_component).set_image_decoded(true);
+            ESP_LOGI("display", "JPEG decode complete and cached");
+          } else {
+            // Show error message if JPEG decode failed
+            it.print(120, 60, id(font_date), c_cyan, TextAlign::TOP_CENTER, "IMAGE ERROR");
+            it.print(120, 100, id(font_message), c_white, TextAlign::TOP_CENTER, image_path.c_str());
+            it.print(120, 140, id(font_small), c_gray, TextAlign::TOP_CENTER,
+                     "Failed to decode JPEG");
+            it.print(120, 180, id(font_small), c_darkgray, TextAlign::TOP_CENTER,
+                     "Send /api/update to clear");
+          }
+        }
+        // Image is cached, don't redraw - just return
+        return;
+      }
+
+      // CLOCK MODE - clear and draw
       it.fill(Color(0, 0, 0));
 
-      // Get state from component
-      auto line_1 = id(smartclock_component).get_line_1();
-      auto line_2 = id(smartclock_component).get_line_2();
-      auto line_3 = id(smartclock_component).get_line_3();
-      auto line_4 = id(smartclock_component).get_line_4();
-      auto line_5 = id(smartclock_component).get_line_5();
-      auto line_6 = id(smartclock_component).get_line_6();
-      auto line_media = id(smartclock_component).get_line_media();
-      auto bar_value = id(smartclock_component).get_bar_value();
-      auto scroll_pos = id(smartclock_component).get_scroll_pos();
+      int current_y = 5;
 
-      // 1. TOP
-      it.print(120, 10, id(font_time), c_white, TextAlign::TOP_CENTER, line_1.c_str());
-      it.printf(0, 0, id(font_small), c_gray, TextAlign::TOP_LEFT, "WiFi: %.0f%%", id(wifi_sig_pct).state);
-      it.print(235, 0, id(font_small), c_gray, TextAlign::TOP_RIGHT, id(my_ip).state.c_str());
-
-      // 2. MEDIA / INFO ROW
-      if (!line_media.empty()) {
-        it.print(scroll_pos, 60, id(font_data), c_cyan, TextAlign::TOP_LEFT, line_media.c_str());
+      // 1. IP Address at top (small, gray)
+      if (id(my_ip).has_state()) {
+        it.print(120, current_y, id(font_small), c_darkgray, TextAlign::TOP_CENTER,
+                 id(my_ip).state.c_str());
+        current_y += 15;
       }
-      it.line(0, 90, 240, 90, c_gray);
 
-      // 3. CENTER POWER BAR
-      it.print(120, 105, id(font_data), c_yellow, TextAlign::CENTER, line_2.c_str());
-      int bx = 35, by = 128, bw = 170, bh = 12;
-      it.rectangle(bx, by, bw, bh, c_gray);
-      int bar_w = bar_value * bw;
-      it.filled_rectangle(bx, by, (bar_w > bw ? bw : bar_w), bh, (bar_value > 0.8 ? Color(255,0,0) : c_green));
-      it.print(bx, by + bh + 2, id(font_small), c_gray, TextAlign::TOP_LEFT, "0W");
-      it.print(bx + bw, by + bh + 2, id(font_small), c_gray, TextAlign::TOP_RIGHT, "5000W");
+      // Calculate vertical centering for time+date block
+      int remaining_height = 240 - current_y;
+      int time_height = 50; // Approximate height for large time
+      int date_height = 30; // Approximate height for date
+      int message_height = 20; // Approximate height for message if present
 
-      it.line(0, 165, 240, 165, c_gray);
+      // Get custom message
+      auto custom_msg = id(smartclock_component).get_custom_message();
+      int total_content_height = time_height + date_height;
+      if (!custom_msg.empty()) {
+        total_content_height += message_height;
+      }
 
-      // 4. BOTTOM ICON ROW
-      int y_i = 185; int y_t = 212;
-      it.print(30, y_i, id(icon_font), c_cyan, TextAlign::CENTER, "\ue1ff");
-      it.print(30, y_t, id(font_data), c_white, TextAlign::TOP_CENTER, line_3.c_str());
+      // Center the time+date block
+      int start_y = current_y + (remaining_height - total_content_height) / 2;
+      current_y = start_y;
 
-      it.print(90, y_i, id(icon_font), c_green, TextAlign::CENTER, "\ue88a");
-      it.print(90, y_t, id(font_data), c_white, TextAlign::TOP_CENTER, line_4.c_str());
+      // 2. Time (large, centered, white)
+      auto time_str = id(smartclock_component).get_time_string();
+      if (!time_str.empty()) {
+        it.print(120, current_y, id(font_time), c_white, TextAlign::TOP_CENTER,
+                 time_str.c_str());
+      } else {
+        // Fallback als time component nog niet beschikbaar is
+        it.print(120, current_y, id(font_time), c_white, TextAlign::TOP_CENTER, "--:--");
+      }
+      current_y += time_height;
 
-      it.print(150, y_i, id(icon_font), Color(150, 200, 255), TextAlign::CENTER, "\ue798");
-      it.print(150, y_t, id(font_data), c_white, TextAlign::TOP_CENTER, line_5.c_str());
+      // 3. Date (medium, centered, white)
+      auto time_now = id(ha_time).now();
+      if (time_now.is_valid()) {
+        it.printf(120, current_y, id(font_date), c_white, TextAlign::TOP_CENTER,
+                  "%02d-%02d-%04d", time_now.day_of_month, time_now.month, time_now.year);
+      }
+      current_y += date_height;
 
-      it.print(210, y_i, id(icon_font), c_yellow, TextAlign::CENTER, "\ue0f0");
-      it.print(210, y_t, id(font_data), c_white, TextAlign::TOP_CENTER, line_6.c_str());
+      // 4. Custom message (small, centered, white) - if set via API
+      if (!custom_msg.empty()) {
+        it.print(120, current_y, id(font_message), c_white, TextAlign::TOP_CENTER,
+                 custom_msg.c_str());
+      }
