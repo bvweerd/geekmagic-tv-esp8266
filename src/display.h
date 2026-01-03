@@ -39,6 +39,7 @@ void displayRenderAPMode();
 void displayRenderImage(const char *path);
 void displayShowMessage(const String &msg);
 void displayShowAPScreen(const char* ssid, const char* password, const char* ip);
+void displayBlankScreen();
 
 extern DisplayState displayState;
 extern TFT_eSPI tft;

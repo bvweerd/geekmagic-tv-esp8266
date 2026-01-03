@@ -429,6 +429,11 @@ void displayRenderAPMode() {
     logPrint(F("displayRenderAPMode DONE"));
 }
 
+void displayBlankScreen() {
+    tft.fillScreen(TFT_BLACK);
+    logPrint(F("Display blanked to black."));
+}
+
 void displayRenderImage(const char *path) {
     if (!LittleFS.exists(path)) {
         displayShowMessage(F("Image not found"));

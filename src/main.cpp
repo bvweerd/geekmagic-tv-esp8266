@@ -286,8 +286,8 @@ bool tryConnectWiFi(int maxAttempts) {
 
                 Serial.printf("  IP: %s\n", WiFi.softAPIP().toString().c_str());
 
+                displayBlankScreen(); // Blank screen before showing AP credentials
         
-
                 displayShowAPScreen(WIFI_AP_NAME, apPassword.c_str(), WiFi.softAPIP().toString().c_str());
 
                 delay(5000);
@@ -340,6 +340,7 @@ void monitorWiFi() {
                 Serial.printf("  Password: %s\n", apPassword.c_str());
                 Serial.printf("  IP: %s\n", WiFi.softAPIP().toString().c_str());
 
+                displayBlankScreen(); // Blank screen before showing AP credentials
                 // Set AP mode display state
                 displayShowAPScreen(WIFI_AP_NAME, apPassword.c_str(), WiFi.softAPIP().toString().c_str());
                 delay(3000);
@@ -419,17 +420,21 @@ void setupFilesystem() {
 
     //LittleFS.format();
 
-    if (!LittleFS.begin()) {
+        if (!LittleFS.begin()) {
 
-        Serial.println(F("LittleFS mount failed"));
+            Serial.println(F("LittleFS mount failed. Formatting LittleFS..."));
 
-        displayShowMessage(F("FS Failed!"));
+            displayShowMessage(F("Formatting FS..."));
 
-        delay(3000);
+            LittleFS.format(); // Format LittleFS if mounting fails
 
-        return;
+            Serial.println(F("LittleFS formatted. Restarting..."));
 
-    }
+            delay(3000);
+
+            ESP.restart(); // Restart after formatting
+
+        }
 
 
 
@@ -671,13 +676,31 @@ void setup() {
 
 
 
-    webserverInit();
+        webserverInit();
 
 
 
-    displayShowMessage(F("Ready!"));
+    
 
-    delay(2000);
+
+
+        // Only show "Ready!" message if not in AP mode
+
+
+
+        if (!displayState.apMode) {
+
+
+
+            displayShowMessage(F("Ready!"));
+
+
+
+            delay(2000);
+
+
+
+        }
 
 
 
