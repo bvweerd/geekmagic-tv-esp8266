@@ -30,7 +30,7 @@
 
 // Update intervals
 #define SCROLL_INTERVAL 30
-#define DISPLAY_UPDATE_INTERVAL 5000
+#define DISPLAY_UPDATE_INTERVAL 1000
 
 // Filesystem
 #define IMAGE_DIR "/image/"
