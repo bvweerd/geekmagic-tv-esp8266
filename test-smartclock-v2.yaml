@@ -1,0 +1,162 @@
+esphome:
+  name: smartclock-v2-test
+  friendly_name: "SmartClock V2 Test"
+  on_boot:
+    priority: -10
+    then:
+      - light.turn_on:
+          id: disp_light
+          brightness: 70%
+      - lambda: |-
+          id(smartclock_component).set_update_callback([=]() {
+            id(smart_display).update();
+          });
+
+esp8266:
+  board: nodemcuv2
+
+wifi:
+  ssid: !secret wifi_ssid
+  password: !secret wifi_password
+  ap:
+    ssid: "SmartClock-V2-Test"
+    password: "smartclock123"
+
+logger:
+  level: DEBUG
+
+ota:
+  - platform: esphome
+  - platform: web_server
+
+api:
+
+# BELANGRIJK: web_server_base voor AsyncWebServer
+web_server_base:
+
+# SmartClock V2 component
+external_components:
+  - source:
+      type: local
+      path: library
+    components: [ smartclock_v2 ]
+
+smartclock_v2:
+  id: smartclock_component
+
+sensor:
+  - platform: wifi_signal
+    id: wifi_sig_pct
+    update_interval: 60s
+
+text_sensor:
+  - platform: wifi_info
+    ip_address:
+      id: my_ip
+
+spi:
+  clk_pin: GPIO14
+  mosi_pin: GPIO13
+  id: spihwd
+
+output:
+  - platform: esp8266_pwm
+    pin: GPIO5
+    frequency: 1000 Hz
+    id: backlight_pwm
+    inverted: true
+
+light:
+  - platform: monochromatic
+    name: "Backlight"
+    output: backlight_pwm
+    id: disp_light
+    restore_mode: ALWAYS_ON
+
+font:
+  - file: "gfonts://Roboto"
+    id: font_time
+    size: 48
+    glyphs: "0123456789: "
+  - file: "gfonts://Roboto"
+    id: font_data
+    size: 19
+    glyphs: "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789.,:-/°%|! "
+  - file: "gfonts://Roboto"
+    id: font_small
+    size: 13
+    glyphs: "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789.,:-/°%|! "
+  - file: "gfonts://Material+Icons"
+    id: icon_font
+    size: 26
+    glyphs: ["\ue1ff", "\ue88a", "\ue798", "\ue0f0"]
+
+display:
+  - platform: mipi_spi
+    model: st7789v
+    spi_id: spihwd
+    data_rate: 20MHz
+    dimensions: {height: 240, width: 240, offset_height: 0, offset_width: 0}
+    invert_colors: true
+    dc_pin: GPIO00
+    reset_pin: GPIO02
+    color_depth: 8
+    update_interval: never
+    id: smart_display
+    spi_mode: mode3
+    auto_clear_enabled: true
+    lambda: |-
+      auto c_gray = Color(100, 100, 100);
+      auto c_white = Color(255, 255, 255);
+      auto c_yellow = Color(255, 255, 0);
+      auto c_green = Color(0, 255, 0);
+      auto c_cyan = Color(0, 255, 255);
+
+      it.fill(Color(0, 0, 0));
+
+      // Get state from component
+      auto line_1 = id(smartclock_component).get_line_1();
+      auto line_2 = id(smartclock_component).get_line_2();
+      auto line_3 = id(smartclock_component).get_line_3();
+      auto line_4 = id(smartclock_component).get_line_4();
+      auto line_5 = id(smartclock_component).get_line_5();
+      auto line_6 = id(smartclock_component).get_line_6();
+      auto line_media = id(smartclock_component).get_line_media();
+      auto bar_value = id(smartclock_component).get_bar_value();
+      auto scroll_pos = id(smartclock_component).get_scroll_pos();
+
+      // 1. TOP
+      it.print(120, 10, id(font_time), c_white, TextAlign::TOP_CENTER, line_1.c_str());
+      it.printf(0, 0, id(font_small), c_gray, TextAlign::TOP_LEFT, "WiFi: %.0f%%", id(wifi_sig_pct).state);
+      it.print(235, 0, id(font_small), c_gray, TextAlign::TOP_RIGHT, id(my_ip).state.c_str());
+
+      // 2. MEDIA / INFO ROW
+      if (!line_media.empty()) {
+        it.print(scroll_pos, 60, id(font_data), c_cyan, TextAlign::TOP_LEFT, line_media.c_str());
+      }
+      it.line(0, 90, 240, 90, c_gray);
+
+      // 3. CENTER POWER BAR
+      it.print(120, 105, id(font_data), c_yellow, TextAlign::CENTER, line_2.c_str());
+      int bx = 35, by = 128, bw = 170, bh = 12;
+      it.rectangle(bx, by, bw, bh, c_gray);
+      int bar_w = bar_value * bw;
+      it.filled_rectangle(bx, by, (bar_w > bw ? bw : bar_w), bh, (bar_value > 0.8 ? Color(255,0,0) : c_green));
+      it.print(bx, by + bh + 2, id(font_small), c_gray, TextAlign::TOP_LEFT, "0W");
+      it.print(bx + bw, by + bh + 2, id(font_small), c_gray, TextAlign::TOP_RIGHT, "5000W");
+
+      it.line(0, 165, 240, 165, c_gray);
+
+      // 4. BOTTOM ICON ROW
+      int y_i = 185; int y_t = 212;
+      it.print(30, y_i, id(icon_font), c_cyan, TextAlign::CENTER, "\ue1ff");
+      it.print(30, y_t, id(font_data), c_white, TextAlign::TOP_CENTER, line_3.c_str());
+
+      it.print(90, y_i, id(icon_font), c_green, TextAlign::CENTER, "\ue88a");
+      it.print(90, y_t, id(font_data), c_white, TextAlign::TOP_CENTER, line_4.c_str());
+
+      it.print(150, y_i, id(icon_font), Color(150, 200, 255), TextAlign::CENTER, "\ue798");
+      it.print(150, y_t, id(font_data), c_white, TextAlign::TOP_CENTER, line_5.c_str());
+
+      it.print(210, y_i, id(icon_font), c_yellow, TextAlign::CENTER, "\ue0f0");
+      it.print(210, y_t, id(font_data), c_white, TextAlign::TOP_CENTER, line_6.c_str());
