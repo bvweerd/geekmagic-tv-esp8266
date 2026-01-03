@@ -22,6 +22,15 @@ struct DisplayState {
     char apPassword[DISPLAY_PASS_BUFFER_SIZE];  // AP mode password to display
 };
 
+// Previous state for selective redraw (eliminate flickering)
+struct PreviousDisplayState {
+    char line1[16];
+    char line2[DISPLAY_LINE_BUFFER_SIZE];
+    char ipInfo[DISPLAY_IP_BUFFER_SIZE];
+    char date[16];
+    bool initialized;
+};
+
 void displayInit();
 void displaySetBrightness(int brightness);
 void displayUpdate();
