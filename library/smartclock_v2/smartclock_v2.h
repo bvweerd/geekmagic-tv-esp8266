@@ -91,6 +91,7 @@ class SmartClockV2Component : public Component {
   // File upload state
   File upload_file_;
   String upload_filename_;
+  bool upload_error_ = false;
 #endif
 };
 

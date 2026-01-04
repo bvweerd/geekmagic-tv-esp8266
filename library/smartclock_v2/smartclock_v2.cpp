@@ -329,31 +329,51 @@ void SmartClockV2Component::setup_handlers() {
   server->on(
       "/doUpload", HTTP_POST,
       [this](AsyncWebServerRequest *request) {
-        // No immediate response. The response will be sent after the upload is complete.
+        this->upload_error_ = false; // Reset error flag for new upload
       },
       [this](AsyncWebServerRequest *request, String filename, size_t index, uint8_t *data, size_t len,
          bool final) {
 #ifdef USE_ESP8266
+        ESP_LOGD(TAG, "onUpload - filename: %s, index: %u, len: %u, final: %u", filename.c_str(), index, len, final);
+
+        if (this->upload_error_) { // If an error already occurred, just ignore subsequent chunks
+            if (final) {
+                ESP_LOGE(TAG, "Upload failed previously, sending error response.");
+                request->send(500, "text/plain", "Upload failed due to prior error.");
+            }
+            return;
+        }
+
         if (index == 0) {
           this->upload_filename_ = filename;
           String filepath = "/image/" + filename;
 
-          ESP_LOGI(TAG, "Upload start: %s", filename.c_str());
+          ESP_LOGI(TAG, "Upload start: %s, filepath: %s", filename.c_str(), filepath.c_str());
 
           this->upload_file_ = LittleFS.open(filepath, "w");
           if (!this->upload_file_) {
             ESP_LOGE(TAG, "Failed to open file for writing: %s", filepath.c_str());
-            request->send(500, "text/plain", "Failed to open file for writing.");
+            this->upload_error_ = true; // Set error flag
             return;
           }
         }
 
         if (this->upload_file_) {
-          this->upload_file_.write(data, len);
+          size_t bytes_written = this->upload_file_.write(data, len);
+          if (bytes_written != len) {
+              ESP_LOGE(TAG, "Failed to write all data to file: %s (wrote %u of %u bytes)", this->upload_filename_.c_str(), bytes_written, len);
+              this->upload_error_ = true;
+              this->upload_file_.close(); // Close file on write error
+              return;
+          }
+        } else {
+            ESP_LOGE(TAG, "Upload file not open but no initial error. This is unexpected.");
+            this->upload_error_ = true;
+            return;
         }
 
         if (final) {
-          if (this->upload_file_) {
+          if (this->upload_file_ && !this->upload_error_) { // Check if file was successfully opened and still valid
             this->upload_file_.close();
             ESP_LOGI(TAG, "Upload finished: %s, total size=%u bytes",
                      filename.c_str(), index + len);
@@ -363,11 +383,10 @@ void SmartClockV2Component::setup_handlers() {
               ESP_LOGI(TAG, "Verified file size: %u bytes", f.size());
               f.close();
             }
-            // Send success response AFTER the file is completely uploaded and closed.
             request->send(200, "text/plain", "OK");
-          } else {
-             // Handle case where upload_file_ might be null if it failed to open initially
-             request->send(500, "text/plain", "Upload failed: file not written.");
+          } else { // This path is hit if upload_file_ was never valid, or closed early due to write error
+             ESP_LOGE(TAG, "Final block: upload_file_ was null or error occurred, sending 500.");
+             request->send(500, "text/plain", "Upload failed: file not written or closed early.");
           }
         }
 #endif
