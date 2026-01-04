@@ -23,6 +23,10 @@ SmartClockV2Component *SmartClockV2Component::instance_ = nullptr;
 void SmartClockV2Component::setup() {
   ESP_LOGCONFIG(TAG, "Setting up SmartClock V2...");
 
+#ifdef USE_ESP8266
+  ESP_LOGI(TAG, "Free heap at startup: %u bytes", ESP.getFreeHeap());
+#endif
+
   // Set static instance pointer for TJpgDec callback
   instance_ = this;
 
@@ -346,13 +350,14 @@ void SmartClockV2Component::setup_handlers() {
 
         if (index == 0) {
           this->upload_filename_ = filename;
-          String filepath = "/image/" + filename;
+          char filepath[64]; // Max path length (including /image/ and null terminator)
+          snprintf(filepath, sizeof(filepath), "/image/%s", filename.c_str());
 
-          ESP_LOGI(TAG, "Upload start: %s, filepath: %s", filename.c_str(), filepath.c_str());
+          ESP_LOGI(TAG, "Upload start: %s, filepath: %s", filename.c_str(), filepath);
 
           this->upload_file_ = LittleFS.open(filepath, "w");
           if (!this->upload_file_) {
-            ESP_LOGE(TAG, "Failed to open file for writing: %s", filepath.c_str());
+            ESP_LOGE(TAG, "Failed to open file for writing: %s", filepath);
             this->upload_error_ = true; // Set error flag
             return;
           }
@@ -425,8 +430,8 @@ bool SmartClockV2Component::tjpg_output_callback(int16_t x, int16_t y, uint16_t 
   }
 
   // Push RGB565 pixels to display
-  // Process in chunks and yield to prevent watchdog
-  const uint16_t PIXELS_PER_YIELD = 240;  // Yield every ~1 line on 240px display
+  // Process in smaller chunks and yield more often to prevent watchdog and save stack
+  const uint16_t PIXELS_PER_YIELD = 120;  // Reduced from 240 to yield more often
   uint16_t pixel_count = 0;
 
   for (uint16_t row = 0; row < h; row++) {
@@ -446,6 +451,7 @@ bool SmartClockV2Component::tjpg_output_callback(int16_t x, int16_t y, uint16_t 
       pixel_count++;
       if (pixel_count >= PIXELS_PER_YIELD) {
         yield();
+        ESP.wdtFeed();  // Explicitly feed watchdog
         pixel_count = 0;
       }
     }
@@ -466,6 +472,10 @@ bool SmartClockV2Component::render_jpeg_image(display::Display &it, const char *
     ESP_LOGW(TAG, "Image file not found: %s", path);
     return false;
   }
+
+  // Log heap before decode
+  uint32_t heap_before = ESP.getFreeHeap();
+  ESP_LOGI(TAG, "Free heap before JPEG decode: %u bytes", heap_before);
 
   // Open file
   File jpgFile = LittleFS.open(path, "r");
@@ -491,6 +501,11 @@ bool SmartClockV2Component::render_jpeg_image(display::Display &it, const char *
   // Feed watchdog after decode
   ESP.wdtFeed();
   yield();
+
+  // Log heap after decode
+  uint32_t heap_after = ESP.getFreeHeap();
+  ESP_LOGI(TAG, "Free heap after JPEG decode: %u bytes (used: %d bytes)",
+           heap_after, (int32_t)heap_before - (int32_t)heap_after);
 
   if (result != 0) {
     ESP_LOGE(TAG, "JPEG decode failed with error: %u", result);

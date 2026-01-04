@@ -7,6 +7,11 @@ esphome:
       - light.turn_on:
           id: disp_light
           brightness: 70%
+      - lambda: |-
+          // Register display update callback
+          id(smartclock_component).set_update_callback([=]() {
+            id(smart_display).update();
+          });
 
 esp8266:
   board: nodemcuv2
@@ -21,13 +26,14 @@ wifi:
     password: "smartclock123"
 
 logger:
-  level: DEBUG
+  level: INFO  # DEBUG uses more RAM
 
 ota:
   - platform: esphome
   - platform: web_server
 
-api:
+# API disabled to save RAM - only needed if using Home Assistant native API
+# api:
 
 # BELANGRIJK: web_server_base voor AsyncWebServer
 web_server_base:
@@ -36,10 +42,11 @@ web_server_base:
 web_server:
   port: 80
 
-# Time component voor de tijd
+# Time component voor de tijd (SNTP to save RAM - homeassistant platform requires API)
 time:
-  - platform: homeassistant
+  - platform: sntp
     id: ha_time
+    timezone: Europe/Amsterdam  # Pas aan naar jouw timezone
     on_time:
       - seconds: /1
         then:
@@ -107,11 +114,11 @@ font:
   - file: "gfonts://Roboto"
     id: font_message
     size: 16
-    glyphs: "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789.,:-/°%|! "
+    glyphs: "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789.,:-/°%|! "  # Reduced from full set
   - file: "gfonts://Roboto"
     id: font_small
     size: 13
-    glyphs: "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789.,:-/°%|! "
+    glyphs: "0123456789.:/ "  # Minimal glyphs for IP address only
 
 display:
   - platform: mipi_spi

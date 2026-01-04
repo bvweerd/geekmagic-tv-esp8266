@@ -83,9 +83,9 @@ class SmartClockV2Component : public Component {
   bool show_image_{false};
   bool image_decoded_{false};  // Track if current image has been decoded
 
-  // Log buffer (circular buffer, last 50 messages)
+  // Log buffer (circular buffer, reduced to save RAM)
   std::vector<std::string> log_buffer_;
-  const size_t MAX_LOG_ENTRIES = 50;
+  const size_t MAX_LOG_ENTRIES = 10;  // Reduced from 50 to save RAM
 
 #ifdef USE_ESP8266
   // File upload state
