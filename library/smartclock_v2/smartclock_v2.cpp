@@ -53,9 +53,18 @@ void SmartClockV2Component::setup() {
     ESP_LOGI(TAG, "Created /image directory");
   }
 
-  // Image clearing on startup is disabled to allow for persistent images.
-  // Images can be cleared manually via the /set?clear=image endpoint.
-  // ESP_LOGI(TAG, "Image persistence is enabled.");
+  // Clear existing images (temporary storage like original)
+  Dir dir = LittleFS.openDir("/image");
+  int cleared = 0;
+  while (dir.next()) {
+    String path = "/image/" + dir.fileName();
+    if (LittleFS.remove(path)) {
+      cleared++;
+    }
+  }
+  if (cleared > 0) {
+    ESP_LOGI(TAG, "Cleared %d temporary image(s)", cleared);
+  }
 #endif
 
   // Load settings from flash
@@ -132,9 +141,9 @@ void SmartClockV2Component::set_image_path(const std::string &path) {
   this->image_decoded_ = false;  // Reset flag to force re-decode
   this->save_settings();
 
-  // Trigger display update directly
-  if (this->display_) {
-    this->display_->update();
+  // Trigger display update
+  if (this->update_callback_) {
+    this->update_callback_();
   }
 
   this->log("Image path set to: " + path);
@@ -177,7 +186,7 @@ void SmartClockV2Component::setup_handlers() {
   // GET /brt.json - Brightness info
   server->on("/brt.json", HTTP_GET, [this](AsyncWebServerRequest *request) {
     JsonDocument doc;
-    doc["brt"] = String(this->settings_.brightness).c_str();
+    doc["brt"] = this->settings_.brightness;
 
     String response;
     serializeJson(doc, response);
@@ -186,11 +195,6 @@ void SmartClockV2Component::setup_handlers() {
 
   // GET /set - Set parameters (brt, img, gmt, theme, clear)
   server->on("/set", HTTP_GET, [this](AsyncWebServerRequest *request) {
-    if (this->is_uploading_) {
-      request->send(503, "text/plain", "Busy uploading");
-      return;
-    }
-
     bool updated = false;
 
     // Set brightness
@@ -274,34 +278,37 @@ void SmartClockV2Component::setup_handlers() {
   });
 
   // POST /api/update - JSON API update (for display updates)
-  server->on("/api/update", HTTP_POST, [this](AsyncWebServerRequest *request) {
-    if (request->hasParam("plain", true)) {
-        String body = request->getParam("plain", true)->value();
-        JsonDocument doc;
-        deserializeJson(doc, body);
+  server->on("/api/update", HTTP_POST, [this](AsyncWebServerRequest *request) {}, nullptr,
+             [this](AsyncWebServerRequest *request, uint8_t *data, size_t len, size_t index, size_t total) {
+               // Parse JSON body
+               JsonDocument doc;
+               DeserializationError error = deserializeJson(doc, data, len);
 
-        // Update custom message (line1 from API -> custom_message_)
-        if (!doc["line1"].isNull()) {
-            this->custom_message_ = doc["line1"].as<std::string>();
-            ESP_LOGD(TAG, "Custom message: %s", this->custom_message_.c_str());
-        } else {
-            this->custom_message_ = "";
-        }
+               if (error) {
+                 ESP_LOGE(TAG, "JSON parse error: %s", error.c_str());
+                 request->send(400, "application/json", "{\"error\":\"Invalid JSON\"}");
+                 return;
+               }
 
-        // Clear image display when API update is received
-        this->show_image_ = false;
-        this->image_decoded_ = false;  // Reset decoded flag
+               // Update custom message (line1 from API -> custom_message_)
+               if (!doc["line1"].isNull()) {
+                 this->custom_message_ = doc["line1"].as<std::string>();
+                 ESP_LOGD(TAG, "Custom message: %s", this->custom_message_.c_str());
+               } else {
+                 this->custom_message_ = "";
+               }
 
-        // Trigger display update directly
-        if (this->display_) {
-            this->display_->update();
-        }
+               // Clear image display when API update is received
+               this->show_image_ = false;
+               this->image_decoded_ = false;  // Reset decoded flag
 
-        request->send(200, "text/plain", "OK");
-    } else {
-        request->send(400, "text/plain", "No JSON body");
-    }
-  });
+               // Trigger display update via callback
+               if (this->update_callback_) {
+                 this->update_callback_();
+               }
+
+               request->send(200, "application/json", "{\"status\":\"ok\"}");
+             });
 
   // GET /api/status - Get current status
   server->on("/api/status", HTTP_GET, [this](AsyncWebServerRequest *request) {
@@ -318,125 +325,47 @@ void SmartClockV2Component::setup_handlers() {
     request->send(200, "application/json", response);
   });
 
-    // File upload handler (/doUpload for backwards compatibility)
+  // File upload handler (/doUpload for backwards compatibility)
+  server->on(
+      "/doUpload", HTTP_POST,
+      [this](AsyncWebServerRequest *request) {
+        request->send(200, "text/plain", "OK");
+      },
+      [this](AsyncWebServerRequest *request, String filename, size_t index, uint8_t *data, size_t len,
+         bool final) {
+#ifdef USE_ESP8266
+        if (index == 0) {
+          this->upload_filename_ = filename;
+          String filepath = "/image/" + filename;
 
-    server->on(
+          ESP_LOGI(TAG, "Upload start: %s", filename.c_str());
 
-        "/doUpload", HTTP_POST,
-
-        [this](AsyncWebServerRequest *request) {
-
-          // The request is handled by the body handler, which responds when the upload is complete.
-
-        },
-
-        [this](AsyncWebServerRequest *request, String filename, size_t index, uint8_t *data, size_t len,
-
-           bool final) {
-
-  #ifdef USE_ESP8266
-
-          if (index == 0) {
-
-            this->is_uploading_ = true;
-
-            this->upload_filename_ = filename;
-
-            
-
-            String target_dir = "/image/"; // Default with trailing slash
-
-            if (request->hasParam("dir", true)) { // Also check POST parameters
-
-                target_dir = request->getParam("dir", true)->value();
-
-                if (!target_dir.startsWith("/")) {
-
-                    target_dir = "/" + target_dir;
-
-                }
-
-                if (!target_dir.endsWith("/")) {
-
-                    target_dir += "/";
-
-                }
-
-            }
-
-  
-
-            if (!LittleFS.exists(target_dir)) {
-
-              LittleFS.mkdir(target_dir);
-
-              ESP_LOGI(TAG, "Created directory: %s", target_dir.c_str());
-
-            }
-
-  
-
-            this->upload_filepath_ = target_dir + filename;
-
-            ESP_LOGI(TAG, "Upload start: %s to %s", filename.c_str(), this->upload_filepath_.c_str());
-
-            this->upload_file_ = LittleFS.open(this->upload_filepath_, "w");
-
-            if (!this->upload_file_) {
-
-              ESP_LOGE(TAG, "Failed to open file for writing: %s", this->upload_filepath_.c_str());
-
-              this->is_uploading_ = false; // Reset flag on failure
-
-              return;
-
-            }
-
+          this->upload_file_ = LittleFS.open(filepath, "w");
+          if (!this->upload_file_) {
+            ESP_LOGE(TAG, "Failed to open file for writing: %s", filepath.c_str());
+            return;
           }
+        }
 
-  
+        if (this->upload_file_) {
+          this->upload_file_.write(data, len);
+        }
 
+        if (final) {
           if (this->upload_file_) {
+            this->upload_file_.close();
+            ESP_LOGI(TAG, "Upload finished: %s, total size=%u bytes",
+                     filename.c_str(), index + len);
 
-            if (this->upload_file_.write(data, len) != len) {
-
-              ESP_LOGE(TAG, "Error writing chunk to file");
-
+            File f = LittleFS.open("/image/" + filename, "r");
+            if (f) {
+              ESP_LOGI(TAG, "Verified file size: %u bytes", f.size());
+              f.close();
             }
-
           }
-
-  
-
-          if (final) {
-
-            if (this->upload_file_) {
-
-              ESP_LOGI(TAG, "Upload finished: %s, total size=%u bytes", this->upload_filepath_.c_str(), index + len);
-
-              this->upload_file_.close();
-
-              this->upload_filepath_ = ""; // Clear path
-
-              request->send(200, "text/plain", "OK"); // Respond only when completely finished
-
-            } else {
-
-              if (!request->isSent()) {
-
-                request->send(500, "text/plain", "Upload failed, no file handle");
-
-              }
-
-            }
-
-            this->is_uploading_ = false; // Reset flag when done
-
-          }
-
-  #endif
-
-        });
+        }
+#endif
+      });
 
   ESP_LOGI(TAG, "API endpoints registered");
 }

@@ -65,7 +65,6 @@ external_components:
 smartclock_v2:
   id: smartclock_component
   backlight: disp_light
-  display_id: smart_display
 
 sensor:
   - platform: wifi_signal
@@ -155,7 +154,7 @@ display:
             ESP_LOGI("display", "JPEG decode complete and cached");
           } else {
             // Show error message if JPEG decode failed
-            it.print(120, 60, id(font_message), c_cyan, TextAlign::TOP_CENTER, "IMAGE ERROR");
+            it.print(120, 60, id(font_date), c_cyan, TextAlign::TOP_CENTER, "IMAGE ERROR");
             it.print(120, 100, id(font_message), c_white, TextAlign::TOP_CENTER, image_path.c_str());
             it.print(120, 140, id(font_small), c_gray, TextAlign::TOP_CENTER,
                      "Failed to decode JPEG");
