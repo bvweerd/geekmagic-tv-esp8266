@@ -329,7 +329,7 @@ void SmartClockV2Component::setup_handlers() {
   server->on(
       "/doUpload", HTTP_POST,
       [this](AsyncWebServerRequest *request) {
-        request->send(200, "text/plain", "OK");
+        // No immediate response. The response will be sent after the upload is complete.
       },
       [this](AsyncWebServerRequest *request, String filename, size_t index, uint8_t *data, size_t len,
          bool final) {
@@ -343,6 +343,7 @@ void SmartClockV2Component::setup_handlers() {
           this->upload_file_ = LittleFS.open(filepath, "w");
           if (!this->upload_file_) {
             ESP_LOGE(TAG, "Failed to open file for writing: %s", filepath.c_str());
+            request->send(500, "text/plain", "Failed to open file for writing.");
             return;
           }
         }
@@ -362,6 +363,11 @@ void SmartClockV2Component::setup_handlers() {
               ESP_LOGI(TAG, "Verified file size: %u bytes", f.size());
               f.close();
             }
+            // Send success response AFTER the file is completely uploaded and closed.
+            request->send(200, "text/plain", "OK");
+          } else {
+             // Handle case where upload_file_ might be null if it failed to open initially
+             request->send(500, "text/plain", "Upload failed: file not written.");
           }
         }
 #endif
