@@ -5,7 +5,6 @@
 #include "esphome/components/web_server_base/web_server_base.h"
 #include "esphome/components/light/light_state.h"
 #include "esphome/components/display/display.h"
-#include <functional>
 #include <vector>
 
 #ifdef USE_ESP8266
@@ -34,11 +33,8 @@ class SmartClockV2Component : public Component {
   // Set light entity for brightness control
   void set_backlight(light::LightState *backlight) { this->backlight_ = backlight; }
 
-  // Set display for JPEG rendering
+  // Set display for JPEG rendering and direct updates
   void set_display(display::Display *display) { this->display_ = display; }
-
-  // Set callback to trigger display update from YAML
-  void set_update_callback(std::function<void()> callback) { this->update_callback_ = callback; }
 
   // Render JPEG image from LittleFS to display (called from YAML)
   bool render_jpeg_image(display::Display &it, const char *path);
@@ -65,7 +61,6 @@ class SmartClockV2Component : public Component {
   void save_settings();
   void log(const std::string &message);
 
-  std::function<void()> update_callback_{nullptr};
   light::LightState *backlight_{nullptr};
   display::Display *display_{nullptr};
   ESPPreferenceObject pref_;
@@ -91,6 +86,8 @@ class SmartClockV2Component : public Component {
   // File upload state
   File upload_file_;
   String upload_filename_;
+  String upload_filepath_;
+  bool is_uploading_{false};
 #endif
 };
 

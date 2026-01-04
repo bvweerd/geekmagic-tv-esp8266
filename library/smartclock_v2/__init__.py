@@ -1,13 +1,13 @@
-"""ESPHome SmartClock V2 - Using AsyncWebServer"""
 import esphome.codegen as cg
 import esphome.config_validation as cv
 from esphome.const import CONF_ID
 from esphome.core import CORE
-from esphome.components import light
+from esphome.components import light, display
 
-DEPENDENCIES = ["network", "web_server_base"]
+DEPENDENCIES = ["display", "network", "web_server_base"]
 
 CONF_BACKLIGHT = "backlight"
+CONF_DISPLAY_ID = "display_id"
 
 smartclock_ns = cg.esphome_ns.namespace("smartclock_v2")
 SmartClockV2Component = smartclock_ns.class_("SmartClockV2Component", cg.Component)
@@ -16,6 +16,7 @@ CONFIG_SCHEMA = cv.Schema(
     {
         cv.GenerateID(): cv.declare_id(SmartClockV2Component),
         cv.Optional(CONF_BACKLIGHT): cv.use_id(light.LightState),
+        cv.Required(CONF_DISPLAY_ID): cv.use_id(display.Display),
     }
 ).extend(cv.COMPONENT_SCHEMA)
 
@@ -24,6 +25,10 @@ async def to_code(config):
     """Generate C++ code for the component"""
     var = cg.new_Pvariable(config[CONF_ID])
     await cg.register_component(var, config)
+
+    # Link display
+    display_var = await cg.get_variable(config[CONF_DISPLAY_ID])
+    cg.add(var.set_display(display_var))
 
     # Optionally link backlight
     if CONF_BACKLIGHT in config:
