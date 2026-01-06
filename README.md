@@ -7,11 +7,14 @@ This firmware is made for the GeekMagic SmallTV Smart Weather Clock as can be fo
 The Smalltv and Smalltv-Ultra are based on an ESP8266, while the Smalltv-Pro uses an ESP32 with more memory and processing power.
 This code has only been tested on the Smalltv Ultra (ESP8266) and may require modifications for other variants.
 
+## ⚠️ First install only using UART
+Users have reported the first install does not work via OTA, coming from another firmware like the stock firmware or ESPHome. Please erase the device completely and install via UART, e.g. with [ESPHome Flasher](https://web.esphome.io/).
+
 ## ⚠️ Flash wear
 
 Updating images frequently will wear out flash fast. Think about your update settings. The reserved space for the filesystem is 1MB.
  
-## ⚠️ OTA Update Safety
+## ⚠️ OTA Update 
 
 This firmware implements **robust OTA update protection** with multiple failsafe mechanisms.
 **While OTA updates are now significantly safer, always keep a USB cable available for emergency recovery via UART if needed.**
