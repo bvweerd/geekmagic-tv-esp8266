@@ -4,8 +4,9 @@ permissions:
   contents: write
 
 on:
-  release:
-    types: [published]
+  push:
+    tags:
+      - 'v*'
 
 jobs:
   build:
@@ -14,6 +15,21 @@ jobs:
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
+
+      - name: Extract version from tag
+        id: get_version
+        run: |
+          TAG_NAME=${GITHUB_REF#refs/tags/}
+          VERSION=${TAG_NAME#v}
+          echo "TAG=$TAG_NAME" >> $GITHUB_OUTPUT
+          echo "VERSION=$VERSION" >> $GITHUB_OUTPUT
+          echo "Building version: $VERSION"
+
+      - name: Update firmware version in code
+        run: |
+          sed -i 's/#define FIRMWARE_VERSION_STRING "dev"/#define FIRMWARE_VERSION_STRING "${{ steps.get_version.outputs.VERSION }}"/' src/settings.h
+          echo "Updated settings.h with version ${{ steps.get_version.outputs.VERSION }}"
+          grep "FIRMWARE_VERSION_STRING" src/settings.h
 
       - name: Set up Python
         uses: actions/setup-python@v5
@@ -28,18 +44,31 @@ jobs:
       - name: Build Firmware
         run: pio run -e nodemcuv2
 
-      - name: Get Release Tag
-        id: get_release_tag
-        run: echo "TAG=${{ github.ref_name }}" >> $GITHUB_OUTPUT
+      - name: Rename firmware binary
+        run: |
+          cp .pio/build/nodemcuv2/firmware.bin smartclock-${{ steps.get_version.outputs.TAG }}.bin
+          ls -lh smartclock-${{ steps.get_version.outputs.TAG }}.bin
 
-      - name: Upload firmware.bin to GitHub Release
+      - name: Create Release
         uses: softprops/action-gh-release@v1
         with:
-          files: .pio/build/nodemcuv2/firmware.bin
-          tag_name: ${{ steps.get_release_tag.outputs.TAG }}
-          name: Firmware ${{ steps.get_release_tag.outputs.TAG }}
+          files: smartclock-${{ steps.get_version.outputs.TAG }}.bin
+          tag_name: ${{ steps.get_version.outputs.TAG }}
+          name: SmartClock Firmware ${{ steps.get_version.outputs.TAG }}
           body: |
-            Firmware binary for release ${{ steps.get_release_tag.outputs.TAG }}
+            ## SmartClock Firmware Release ${{ steps.get_version.outputs.TAG }}
+
+            ### Installation
+            1. Download the `smartclock-${{ steps.get_version.outputs.TAG }}.bin` file
+            2. Go to your SmartClock web interface
+            3. Navigate to "Advanced Actions" → "Firmware Update (OTA)"
+            4. Upload the downloaded binary file
+            5. Wait for the update to complete and the device to restart
+
+            ### What's Changed
+            - Firmware version: ${{ steps.get_version.outputs.VERSION }}
+
+            **Full Changelog**: https://github.com/${{ github.repository }}/commits/${{ steps.get_version.outputs.TAG }}
           draft: false
           prerelease: false
         env:

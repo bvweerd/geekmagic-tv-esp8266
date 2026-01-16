@@ -7,6 +7,11 @@
 // Firmware version - increment when Settings structure changes
 #define FIRMWARE_VERSION 2
 
+// Semantic version string (replaced by GitHub Action during release builds)
+#ifndef FIRMWARE_VERSION_STRING
+#define FIRMWARE_VERSION_STRING "dev"
+#endif
+
 struct Settings {
     uint16_t version;          // Firmware version for compatibility check
     int brightness;
