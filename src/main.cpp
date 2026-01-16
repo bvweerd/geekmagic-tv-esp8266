@@ -62,7 +62,18 @@ bool tryConnectWiFi(int maxAttempts) {
             yield();
         }
 
+                // Wait for IP address to be assigned after WiFi connection
                 if (WiFi.status() == WL_CONNECTED) {
+                    Serial.println(F("WiFi associated, waiting for IP..."));
+                    unsigned long ipWaitStart = millis();
+                    while (WiFi.localIP() == IPAddress(0,0,0,0) &&
+                           millis() - ipWaitStart < 10000) { // Wait up to 10 seconds for IP
+                        delay(100);
+                        yield();
+                    }
+                }
+
+                if (WiFi.status() == WL_CONNECTED && WiFi.localIP() != IPAddress(0,0,0,0)) {
 
                     Serial.println(F("WiFi connected!"));
 
