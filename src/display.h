@@ -40,6 +40,8 @@ void displayRenderImage(const char *path);
 void displayShowMessage(const String &msg);
 void displayShowAPScreen(const char* ssid, const char* password, const char* ip);
 void displayBlankScreen();
+void displayCycleNextPage();
+void displayToggleBacklight();
 
 extern DisplayState displayState;
 extern TFT_eSPI tft;
