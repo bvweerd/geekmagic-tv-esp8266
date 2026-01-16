@@ -9,9 +9,7 @@ This code has only been tested on the Smalltv Ultra (ESP8266) and may require mo
 
 ## ⚠️ First install only using UART
 
-Users have reported the first install does not work via OTA, coming from another firmware like the stock firmware or ESPHome. Please erase the device completely and install via UART, e.g. with [ESPHome Flasher](https://web.esphome.io/).
-
-![UART pinout](assets/UART-pinout.jpg)
+Users have reported the first install does not work via OTA, coming from another firmware like the stock firmware or ESPHome. Please erase the device completely and install via UART, e.g. with [ESPHome Flasher](https://web.esphome.io/). See [FLASHING.md](FLASHING.md) for a detailed step-by-step guide.
 
 ## ⚠️ Flash wear
 
