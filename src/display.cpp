@@ -451,7 +451,10 @@ void displayRenderImage(const char *path) {
 
     // Direct image swap without clearing screen for smooth transitions
     // The new JPEG will overwrite the previous image directly
+    // Keep CS low during entire transfer to reduce overhead and speed up rendering
+    tft.startWrite();
     JRESULT res = TJpgDec.drawFsJpg(0, 0, jpgFile);
+    tft.endWrite();
     if (res != JDR_OK) {
         String errorMsg = String(F("JPEG Decode Failed\nCode: ")) + String(res);
         displayShowMessage(errorMsg);
