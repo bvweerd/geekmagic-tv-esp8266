@@ -449,8 +449,8 @@ void displayRenderImage(const char *path) {
     }
     logPrint(String(F("INFO: Image file opened: ")) + path);
 
-    tft.fillScreen(TFT_BLACK);
-
+    // Direct image swap without clearing screen for smooth transitions
+    // The new JPEG will overwrite the previous image directly
     JRESULT res = TJpgDec.drawFsJpg(0, 0, jpgFile);
     if (res != JDR_OK) {
         String errorMsg = String(F("JPEG Decode Failed\nCode: ")) + String(res);
