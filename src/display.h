@@ -28,6 +28,8 @@ struct PreviousDisplayState {
     char line2[DISPLAY_LINE_BUFFER_SIZE];
     char ipInfo[DISPLAY_IP_BUFFER_SIZE];
     char date[16];
+    int prevTimeWidth;  // Track previous time text width for proper clearing
+    int prevDateWidth; // Track previous date text width for proper clearing
     bool initialized;
 };
 
@@ -45,6 +47,7 @@ void displayToggleBacklight();
 
 extern DisplayState displayState;
 extern TFT_eSPI tft;
+extern TFT_eSprite sprite;  // Framebuffer for atomic screen updates
 extern int scrollPos;
 
 #endif

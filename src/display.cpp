@@ -14,12 +14,22 @@
 #define FONT_TIME 6      // Large font for the main clock time
 
 TFT_eSPI tft = TFT_eSPI();
+TFT_eSprite sprite = TFT_eSprite(&tft);  // Framebuffer for atomic screen updates
 DisplayState displayState;
 int scrollPos = 240;
 
 bool tft_output(int16_t x, int16_t y, uint16_t w, uint16_t h, uint16_t* bitmap) {
-    if (y >= tft.height()) return 0;
-    tft.pushImage(x, y, w, h, bitmap);
+    // JPEG decoder outputs 16-bit RGB565, so only use sprite if it's 16-bit
+    // For 8-bit sprite or no sprite, draw directly to TFT
+    TFT_eSPI* target;
+    if (sprite.created() && sprite.getColorDepth() == 16) {
+        target = &sprite;
+    } else {
+        target = &tft;
+    }
+
+    if (y >= target->height()) return 0;
+    target->pushImage(x, y, w, h, bitmap);
     return 1;
 }
 
@@ -37,9 +47,9 @@ std::vector<String> wrapText(String text, int font, int maxWidth) {
     String currentLine = "";
     String word = "";
     // Temporarily increase buffer size to handle longer lines during word accumulation
-    currentLine.reserve(text.length() + 10); 
-        word.reserve(text.length() + 10); 
-    
+    currentLine.reserve(text.length() + 10);
+        word.reserve(text.length() + 10);
+
         for (size_t i = 0; i < text.length(); i++) {
             char c = text.charAt(i);
             if (c == ' ') {            // Check if adding the word exceeds maxWidth
@@ -95,12 +105,46 @@ void getFormattedDate(char* buffer, size_t bufferSize) {
     buffer[bufferSize - 1] = '\0'; // Ensure null-termination
 }
 
+// Helper function to get drawing target (sprite if available, else TFT)
+TFT_eSPI* getDrawTarget() {
+    return sprite.created() ? &sprite : &tft;
+}
+
+// Push framebuffer to display in one atomic operation
+void pushFramebuffer() {
+    if (sprite.created()) {
+        // Use batched SPI writes to minimize visible transfer time
+        tft.startWrite();
+        sprite.pushSprite(0, 0);
+        tft.endWrite();
+    }
+}
+
+
 void displayInit() {
     logPrint(F("Display init..."));
 
     tft.init();
     tft.setRotation(0);
     tft.invertDisplay(true);  // Match ESPHome invert_colors: true
+
+    // Initialize framebuffer sprite for atomic screen updates
+    // Try 16-bit first (required for JPEG), fall back to 8-bit if memory constrained
+    sprite.setColorDepth(16);
+    bool spriteCreated = sprite.createSprite(DISPLAY_WIDTH, DISPLAY_HEIGHT);
+
+    if (!spriteCreated) {
+        logPrint(F("16-bit sprite failed, trying 8-bit..."));
+        sprite.setColorDepth(8);
+        spriteCreated = sprite.createSprite(DISPLAY_WIDTH, DISPLAY_HEIGHT);
+    }
+
+    if (spriteCreated) {
+        sprite.setRotation(0);
+        logPrintf("Framebuffer sprite created (%d-bit, %dx%d)", sprite.getColorDepth(), DISPLAY_WIDTH, DISPLAY_HEIGHT);
+    } else {
+        logPrint(F("WARNING: Framebuffer sprite creation failed, using direct drawing"));
+    }
 
     logPrint(F("Display initialized, testing colors..."));
 
@@ -182,7 +226,9 @@ void displayUpdate() {
 
     // On mode change, force full redraw
     if (currentMode != lastMode) {
-        tft.fillScreen(TFT_BLACK);
+        TFT_eSPI* drawTarget = getDrawTarget();
+        drawTarget->fillScreen(TFT_BLACK);
+        pushFramebuffer();
         lastMode = currentMode;
     }
 
@@ -205,68 +251,101 @@ void displayRenderClock() {
     // Track previous state to avoid flickering
     static PreviousDisplayState prevState = {0};
 
+    // For clock updates, always use direct TFT drawing to eliminate sprite push flicker
+    // No sprite usage for clock rendering
+    int screenWidth = tft.width();
+    int screenHeight = tft.height();
+
     // Check if layout changed (IP appeared/disappeared)
     bool hadIP = prevState.ipInfo[0] != '\0';
     bool hasIP = displayState.ipInfo[0] != '\0';
     bool layoutChanged = (hadIP != hasIP);
 
-    // Clear screen on first render or layout change
+    // Check if anything changed - if nothing changed and initialized, skip redraw
+    bool timeChanged = strcmp(displayState.line1, prevState.line1) != 0;
+    char currentDate[16];
+    getFormattedDate(currentDate, sizeof(currentDate));
+    bool dateChanged = strcmp(currentDate, prevState.date) != 0;
+    bool ipChanged = strcmp(displayState.ipInfo, prevState.ipInfo) != 0;
+    bool messageChanged = strcmp(displayState.line2, prevState.line2) != 0;
+
+    bool needsRedraw = !prevState.initialized || layoutChanged || timeChanged || dateChanged || ipChanged || messageChanged;
+
+    if (!needsRedraw) {
+        return; // Nothing changed, skip redraw
+    }
+
+    // Clear screen on first render or layout change, otherwise keep existing content
     if (!prevState.initialized || layoutChanged) {
+        tft.startWrite();
         tft.fillScreen(TFT_BLACK);
+        tft.endWrite();
         prevState.initialized = true;
-        // Force redraw all on layout change
+        // Force redraw all on layout change - clear previous state
         prevState.line1[0] = '\0';
         prevState.line2[0] = '\0';
         prevState.date[0] = '\0';
+        prevState.ipInfo[0] = '\0'; // Clear IP info to force redraw
+        prevState.prevTimeWidth = 0;
+        prevState.prevDateWidth = 0;
     }
 
     int currentY = 5; // Start from top with small margin
 
     // Display IP Info at the top (small font) - only if changed
-    bool ipChanged = strcmp(displayState.ipInfo, prevState.ipInfo) != 0;
     if (displayState.ipInfo[0] != '\0') {
-        tft.setTextColor(TFT_DARKGREY, TFT_BLACK);
+        // Always use direct TFT drawing for IP updates (no sprite)
+        tft.setTextColor(TFT_DARKGREY, TFT_BLACK); // Gray text for IP info
         tft.setTextDatum(TC_DATUM);
         int ipFont = FONT_INFO; // Small font
         tft.setTextFont(ipFont);
         int ipLineHeight = tft.fontHeight();
-        std::vector<String> ipWrappedLines = wrapText(String(displayState.ipInfo), ipFont, tft.width() - 10);
+        std::vector<String> ipWrappedLines = wrapText(String(displayState.ipInfo), ipFont, screenWidth - 10);
 
-        if (ipChanged || !prevState.initialized) {
-            // Clear previous IP area
-            tft.fillRect(0, currentY, tft.width(), ipWrappedLines.size() * ipLineHeight, TFT_BLACK);
+        if (ipChanged || !prevState.initialized || layoutChanged) {
+            // Direct TFT drawing for IP updates - use background color text, minimal clearing
+            tft.startWrite();
+            // Clear IP area first to ensure clean display (especially on first render)
+            static int prevIPLines = 0;
+            int maxLines = (ipWrappedLines.size() > prevIPLines) ? ipWrappedLines.size() : prevIPLines;
+            if (maxLines > 0) {
+                tft.fillRect(0, currentY, screenWidth, maxLines * ipLineHeight + 5, TFT_BLACK);
+            }
+            prevIPLines = ipWrappedLines.size();
 
             for (size_t i = 0; i < ipWrappedLines.size(); i++) {
-                tft.drawString(ipWrappedLines[i], tft.width() / 2, currentY + (i * ipLineHeight), ipFont);
+                tft.drawString(ipWrappedLines[i], screenWidth / 2, currentY + (i * ipLineHeight), ipFont);
             }
+            tft.endWrite();
+
             strncpy(prevState.ipInfo, displayState.ipInfo, sizeof(prevState.ipInfo) - 1);
+            prevState.ipInfo[sizeof(prevState.ipInfo) - 1] = '\0'; // Ensure null termination
         }
         currentY += ipWrappedLines.size() * ipLineHeight + 10; // Add spacing after IP
+    } else if (prevState.ipInfo[0] != '\0') {
+        // IP was cleared - erase previous IP area
+        tft.startWrite();
+        tft.fillRect(0, 5, screenWidth, 30, TFT_BLACK); // Clear reasonable IP area
+        tft.endWrite();
+        prevState.ipInfo[0] = '\0';
     }
 
-    // Check if time or date changed
-    bool timeChanged = strcmp(displayState.line1, prevState.line1) != 0;
-    char currentDate[16];
-    getFormattedDate(currentDate, sizeof(currentDate));
-    bool dateChanged = strcmp(currentDate, prevState.date) != 0;
-
     // Display Time (displayState.line1) - Centered
-    tft.setTextColor(TFT_WHITE, TFT_BLACK);
     tft.setTextDatum(TC_DATUM);
     int timeFont = FONT_TIME;
     tft.setTextFont(timeFont);
     int timeLineHeight = tft.fontHeight();
-    std::vector<String> timeWrappedLines = wrapText(String(displayState.line1), timeFont, tft.width());
+    std::vector<String> timeWrappedLines = wrapText(String(displayState.line1), timeFont, screenWidth);
 
     // Calculate remaining space and center time vertically in it
-    int remainingHeight = tft.height() - currentY;
+    int remainingHeight = screenHeight - currentY;
     int totalTextHeight = timeWrappedLines.size() * timeLineHeight;
 
     // Add date height to calculation
     int dateFont = FONT_DEFAULT;
     tft.setTextFont(dateFont);
     int dateLineHeight = tft.fontHeight();
-    std::vector<String> dateWrappedLines = wrapText(String(currentDate), dateFont, tft.width());
+    std::vector<String> dateWrappedLines = wrapText(String(currentDate), dateFont, screenWidth);
     int totalDateHeight = dateWrappedLines.size() * dateLineHeight;
 
     // Center the time+date block in remaining space
@@ -275,15 +354,40 @@ void displayRenderClock() {
     currentY = timeStartY;
 
     // Draw time - only if changed
-    if (timeChanged || !prevState.initialized) {
+    if (timeChanged || !prevState.initialized || layoutChanged) {
+        // Always use direct TFT drawing for clock updates (no sprite)
         tft.setTextFont(timeFont);
-        // Clear time area
-        tft.fillRect(0, currentY, tft.width(), totalTextHeight, TFT_BLACK);
+        tft.setTextColor(TFT_WHITE, TFT_BLACK); // Text color, background color
 
+        // Calculate exact text width to minimize clearing area
+        int maxTextWidth = 0;
         for (size_t i = 0; i < timeWrappedLines.size(); i++) {
-            tft.drawString(timeWrappedLines[i], tft.width() / 2, currentY + (i * timeLineHeight), timeFont);
+            int textWidth = tft.textWidth(timeWrappedLines[i]);
+            if (textWidth > maxTextWidth) maxTextWidth = textWidth;
         }
+
+        // Update previous width for next comparison
+        int prevTimeWidth = prevState.prevTimeWidth;
+        prevState.prevTimeWidth = maxTextWidth;
+
+        // Direct TFT drawing with batched SPI for smooth updates (avoids sprite push flicker)
+        // Use text with background color - minimal fillRect to eliminate visible clearing
+        tft.startWrite();
+        // Draw text with background color - it will overwrite old text
+        // If text got shorter, we need to clear the extra area
+        if (maxTextWidth < prevTimeWidth) {
+            // Only clear the extra width that's no longer needed
+            int extraWidth = prevTimeWidth - maxTextWidth;
+            int extraX = (screenWidth + maxTextWidth) / 2 + 2; // Right side of new text
+            tft.fillRect(extraX, currentY, extraWidth, totalTextHeight, TFT_BLACK);
+        }
+        for (size_t i = 0; i < timeWrappedLines.size(); i++) {
+            tft.drawString(timeWrappedLines[i], screenWidth / 2, currentY + (i * timeLineHeight), timeFont);
+        }
+        tft.endWrite();
+
         strncpy(prevState.line1, displayState.line1, sizeof(prevState.line1) - 1);
+        prevState.line1[sizeof(prevState.line1) - 1] = '\0'; // Ensure null termination
     }
     currentY += totalTextHeight; // Move Y past the time block
 
@@ -291,37 +395,61 @@ void displayRenderClock() {
     currentY += timeLineHeight / 2; // Roughly half a line height padding
 
     // Display Date (getFormattedDate()) - Centered, below time - only if changed
-    if (dateChanged || !prevState.initialized) {
+    if (dateChanged || !prevState.initialized || layoutChanged) {
+        // Always use direct TFT drawing for date updates (no sprite)
         tft.setTextFont(dateFont);
-        // Clear date area
-        tft.fillRect(0, currentY, tft.width(), totalDateHeight, TFT_BLACK);
+        tft.setTextColor(TFT_WHITE, TFT_BLACK); // Text with background color
 
+        // Calculate exact text width to minimize clearing area
+        int maxTextWidth = 0;
         for (size_t i = 0; i < dateWrappedLines.size(); i++) {
-            tft.drawString(dateWrappedLines[i], tft.width() / 2, currentY + (i * dateLineHeight), dateFont);
+            int textWidth = tft.textWidth(dateWrappedLines[i]);
+            if (textWidth > maxTextWidth) maxTextWidth = textWidth;
         }
+
+        // Update previous width for next comparison
+        int prevDateWidth = prevState.prevDateWidth;
+        prevState.prevDateWidth = maxTextWidth;
+
+        // Direct TFT drawing for date updates - minimal fillRect, use background color text
+        tft.startWrite();
+        // If text got shorter, clear only the extra area
+        if (maxTextWidth < prevDateWidth) {
+            int extraWidth = prevDateWidth - maxTextWidth;
+            int extraX = (screenWidth + maxTextWidth) / 2 + 2;
+            tft.fillRect(extraX, currentY, extraWidth, totalDateHeight, TFT_BLACK);
+        }
+        for (size_t i = 0; i < dateWrappedLines.size(); i++) {
+            tft.drawString(dateWrappedLines[i], screenWidth / 2, currentY + (i * dateLineHeight), dateFont);
+        }
+        tft.endWrite();
+
         strncpy(prevState.date, currentDate, sizeof(prevState.date) - 1);
+        prevState.date[sizeof(prevState.date) - 1] = '\0'; // Ensure null termination
     }
     currentY += totalDateHeight; // Move Y past the date block
 
     // Display Custom Message (displayState.line2) - Centered, below date - only if changed
-    bool messageChanged = strcmp(displayState.line2, prevState.line2) != 0;
     if (displayState.line2[0] != '\0') {
         int messageFont = FONT_MESSAGE; // Smaller font for messages
         tft.setTextFont(messageFont);
+        tft.setTextColor(TFT_WHITE, TFT_BLACK);
         int messageLineHeight = tft.fontHeight();
-        std::vector<String> messageWrappedLines = wrapText(String(displayState.line2), messageFont, tft.width());
+        std::vector<String> messageWrappedLines = wrapText(String(displayState.line2), messageFont, screenWidth);
 
         // Add some padding between date and message
         currentY += messageLineHeight / 2;
 
-        if (messageChanged || !prevState.initialized) {
-            // Clear message area (might need to clear previous if longer)
-            tft.fillRect(0, currentY, tft.width(), messageWrappedLines.size() * messageLineHeight + 10, TFT_BLACK);
-
+        if (messageChanged || !prevState.initialized || layoutChanged) {
+            // Direct TFT draw for messages too
+            tft.startWrite();
+            tft.fillRect(0, currentY, screenWidth, messageWrappedLines.size() * messageLineHeight + 10, TFT_BLACK);
             for (size_t i = 0; i < messageWrappedLines.size(); i++) {
-                tft.drawString(messageWrappedLines[i], tft.width() / 2, currentY + (i * messageLineHeight), messageFont);
+                tft.drawString(messageWrappedLines[i], screenWidth / 2, currentY + (i * messageLineHeight), messageFont);
             }
+            tft.endWrite();
             strncpy(prevState.line2, displayState.line2, sizeof(prevState.line2) - 1);
+            prevState.line2[sizeof(prevState.line2) - 1] = '\0'; // Ensure null termination
         }
     } else if (prevState.line2[0] != '\0') {
         // Message was cleared - erase previous message
@@ -329,9 +457,13 @@ void displayRenderClock() {
         tft.setTextFont(messageFont);
         int messageLineHeight = tft.fontHeight();
         currentY += messageLineHeight / 2;
-        tft.fillRect(0, currentY, tft.width(), messageLineHeight * 3, TFT_BLACK);
+        tft.startWrite();
+        tft.fillRect(0, currentY, screenWidth, messageLineHeight * 3, TFT_BLACK);
+        tft.endWrite();
         prevState.line2[0] = '\0';
     }
+
+    // No sprite push needed - all drawing is direct to TFT
 
     logPrint(F("displayRenderClock DONE (Simplified)"));
 }
@@ -339,10 +471,15 @@ void displayRenderClock() {
 void displayRenderAPMode() {
     logPrint(F("displayRenderAPMode START"));
 
+    // Get drawing target (sprite if available, else TFT)
+    TFT_eSPI* drawTarget = getDrawTarget();
+    int screenWidth = drawTarget->width();
+    int screenHeight = drawTarget->height();
+
     // Only clear screen on mode change
     static bool apModeRendered = false;
     if (!apModeRendered) {
-        tft.fillScreen(TFT_BLACK);
+        drawTarget->fillScreen(TFT_BLACK);
         apModeRendered = true;
     }
 
@@ -350,36 +487,36 @@ void displayRenderAPMode() {
 
     // Display IP Info at the top (small font)
     if (displayState.ipInfo[0] != '\0') {
-        tft.setTextColor(TFT_DARKGREY, TFT_BLACK);
-        tft.setTextDatum(TC_DATUM);
+        drawTarget->setTextColor(TFT_DARKGREY, TFT_BLACK);
+        drawTarget->setTextDatum(TC_DATUM);
         int ipFont = FONT_INFO; // Small font
-        tft.setTextFont(ipFont);
-        int ipLineHeight = tft.fontHeight();
-        std::vector<String> ipWrappedLines = wrapText(String(displayState.ipInfo), ipFont, tft.width() - 10);
+        drawTarget->setTextFont(ipFont);
+        int ipLineHeight = drawTarget->fontHeight();
+        std::vector<String> ipWrappedLines = wrapText(String(displayState.ipInfo), ipFont, screenWidth - 10);
 
         for (size_t i = 0; i < ipWrappedLines.size(); i++) {
-            tft.drawString(ipWrappedLines[i], tft.width() / 2, currentY + (i * ipLineHeight), ipFont);
+            drawTarget->drawString(ipWrappedLines[i], screenWidth / 2, currentY + (i * ipLineHeight), ipFont);
         }
         currentY += ipWrappedLines.size() * ipLineHeight + 20; // Add spacing after IP
     }
 
     // Calculate remaining vertical space
-    int remainingHeight = tft.height() - currentY;
+    int remainingHeight = screenHeight - currentY;
 
     // Display "AP Mode" header
-    tft.setTextColor(TFT_CYAN, TFT_BLACK);
-    tft.setTextDatum(TC_DATUM);
+    drawTarget->setTextColor(TFT_CYAN, TFT_BLACK);
+    drawTarget->setTextDatum(TC_DATUM);
     int headerFont = FONT_DEFAULT;
-    tft.setTextFont(headerFont);
-    int headerHeight = tft.fontHeight();
+    drawTarget->setTextFont(headerFont);
+    int headerHeight = drawTarget->fontHeight();
 
     // Display SSID label and value
     int labelFont = FONT_MESSAGE;
     int valueFont = FONT_DEFAULT;
-    tft.setTextFont(labelFont);
-    int labelHeight = tft.fontHeight();
-    tft.setTextFont(valueFont);
-    int valueHeight = tft.fontHeight();
+    drawTarget->setTextFont(labelFont);
+    int labelHeight = drawTarget->fontHeight();
+    drawTarget->setTextFont(valueFont);
+    int valueHeight = drawTarget->fontHeight();
 
     // Calculate total content height
     int totalContentHeight = headerHeight + 10 + // "AP Mode" + spacing
@@ -390,47 +527,52 @@ void displayRenderAPMode() {
     int contentStartY = currentY + (remainingHeight - totalContentHeight) / 2;
 
     // Draw "AP Mode" header
-    tft.setTextFont(headerFont);
-    tft.setTextColor(TFT_CYAN, TFT_BLACK);
-    tft.drawString("AP Mode", tft.width() / 2, contentStartY, headerFont);
+    drawTarget->setTextFont(headerFont);
+    drawTarget->setTextColor(TFT_CYAN, TFT_BLACK);
+    drawTarget->drawString("AP Mode", screenWidth / 2, contentStartY, headerFont);
     contentStartY += headerHeight + 10;
 
     // Draw SSID label
-    tft.setTextFont(labelFont);
-    tft.setTextColor(TFT_DARKGREY, TFT_BLACK);
-    tft.drawString("SSID:", tft.width() / 2, contentStartY, labelFont);
+    drawTarget->setTextFont(labelFont);
+    drawTarget->setTextColor(TFT_DARKGREY, TFT_BLACK);
+    drawTarget->drawString("SSID:", screenWidth / 2, contentStartY, labelFont);
     contentStartY += labelHeight;
 
     // Draw SSID value
-    tft.setTextFont(valueFont);
-    tft.setTextColor(TFT_WHITE, TFT_BLACK);
-    std::vector<String> ssidWrappedLines = wrapText(String(displayState.apSSID), valueFont, tft.width() - 20); // -20 for margins
+    drawTarget->setTextFont(valueFont);
+    drawTarget->setTextColor(TFT_WHITE, TFT_BLACK);
+    std::vector<String> ssidWrappedLines = wrapText(String(displayState.apSSID), valueFont, screenWidth - 20); // -20 for margins
     int ssidLineY = contentStartY;
     for (size_t i = 0; i < ssidWrappedLines.size(); i++) {
-        tft.drawString(ssidWrappedLines[i], tft.width() / 2, ssidLineY + (i * valueHeight), valueFont);
+        drawTarget->drawString(ssidWrappedLines[i], screenWidth / 2, ssidLineY + (i * valueHeight), valueFont);
     }
     contentStartY += ssidWrappedLines.size() * valueHeight + 10;
 
     // Draw Password label
-    tft.setTextFont(labelFont);
-    tft.setTextColor(TFT_DARKGREY, TFT_BLACK);
-    tft.drawString("Password:", tft.width() / 2, contentStartY, labelFont);
+    drawTarget->setTextFont(labelFont);
+    drawTarget->setTextColor(TFT_DARKGREY, TFT_BLACK);
+    drawTarget->drawString("Password:", screenWidth / 2, contentStartY, labelFont);
     contentStartY += labelHeight;
 
     // Draw Password value
-    tft.setTextFont(valueFont);
-    tft.setTextColor(TFT_WHITE, TFT_BLACK);
-    std::vector<String> passwordWrappedLines = wrapText(String(displayState.apPassword), valueFont, tft.width() - 20); // -20 for margins
+    drawTarget->setTextFont(valueFont);
+    drawTarget->setTextColor(TFT_WHITE, TFT_BLACK);
+    std::vector<String> passwordWrappedLines = wrapText(String(displayState.apPassword), valueFont, screenWidth - 20); // -20 for margins
     int passwordLineY = contentStartY;
     for (size_t i = 0; i < passwordWrappedLines.size(); i++) {
-        tft.drawString(passwordWrappedLines[i], tft.width() / 2, passwordLineY + (i * valueHeight), valueFont);
+        drawTarget->drawString(passwordWrappedLines[i], screenWidth / 2, passwordLineY + (i * valueHeight), valueFont);
     }
+
+    // Push entire framebuffer to display in one atomic operation
+    pushFramebuffer();
 
     logPrint(F("displayRenderAPMode DONE"));
 }
 
 void displayBlankScreen() {
-    tft.fillScreen(TFT_BLACK);
+    TFT_eSPI* drawTarget = getDrawTarget();
+    drawTarget->fillScreen(TFT_BLACK);
+    pushFramebuffer();
     logPrint(F("Display blanked to black."));
 }
 
@@ -451,30 +593,50 @@ void displayRenderImage(const char *path) {
 
     // Direct image swap without clearing screen for smooth transitions
     // The new JPEG will overwrite the previous image directly
-    // Keep CS low during entire transfer to reduce overhead and speed up rendering
-    tft.startWrite();
-    JRESULT res = TJpgDec.drawFsJpg(0, 0, jpgFile);
-    tft.endWrite();
-    if (res != JDR_OK) {
-        String errorMsg = String(F("JPEG Decode Failed\nCode: ")) + String(res);
-        displayShowMessage(errorMsg);
-        logPrint(errorMsg);
+    // If using 16-bit sprite, JPEG draws to sprite, then we push it all at once
+    // If using 8-bit sprite or no sprite, JPEG draws directly to TFT
+    bool useSprite = sprite.created() && sprite.getColorDepth() == 16;
+
+    if (useSprite) {
+        // Draw to sprite first, then push all at once
+        JRESULT res = TJpgDec.drawFsJpg(0, 0, jpgFile);
+        if (res != JDR_OK) {
+            String errorMsg = String(F("JPEG Decode Failed\nCode: ")) + String(res);
+            displayShowMessage(errorMsg);
+            logPrint(errorMsg);
+        } else {
+            // Push entire framebuffer to display in one atomic operation
+            pushFramebuffer();
+        }
+    } else {
+        // Draw directly to TFT with batched SPI
+        tft.startWrite();
+        JRESULT res = TJpgDec.drawFsJpg(0, 0, jpgFile);
+        tft.endWrite();
+        if (res != JDR_OK) {
+            String errorMsg = String(F("JPEG Decode Failed\nCode: ")) + String(res);
+            displayShowMessage(errorMsg);
+            logPrint(errorMsg);
+        }
     }
 
     jpgFile.close(); // Close the file after decoding attempt
 }
 
 void displayShowMessage(const String &msg) {
-    tft.fillScreen(TFT_BLACK); // Re-added for previous behavior
-    tft.setTextColor(TFT_WHITE, TFT_BLACK);
-    tft.setTextDatum(MC_DATUM);
+    TFT_eSPI* drawTarget = getDrawTarget();
+    int screenWidth = drawTarget->width();
+    int screenHeight = drawTarget->height();
 
-    int startY = tft.height() / 2; // Starting Y position, will be adjusted
+    drawTarget->setTextColor(TFT_WHITE, TFT_BLACK);
+    drawTarget->setTextDatum(MC_DATUM);
+
+    int startY = screenHeight / 2; // Starting Y position, will be adjusted
     int font = FONT_DEFAULT;
-    
+
     // Calculate line height based on the font
-    tft.setTextFont(font); // Set font for height calculation
-    int lineHeight = tft.fontHeight();
+    drawTarget->setTextFont(font); // Set font for height calculation
+    int lineHeight = drawTarget->fontHeight();
 
     // Split message by newline characters first
     std::vector<String> linesToProcess;
@@ -489,17 +651,22 @@ void displayShowMessage(const String &msg) {
 
     std::vector<String> finalWrappedLines;
     for (size_t i = 0; i < linesToProcess.size(); i++) {
-        std::vector<String> wrapped = wrapText(linesToProcess[i], font, tft.width());
+        std::vector<String> wrapped = wrapText(linesToProcess[i], font, screenWidth);
         finalWrappedLines.insert(finalWrappedLines.end(), wrapped.begin(), wrapped.end());
     }
-    
+
     // Adjust startY to vertically center the block of text
     startY -= (finalWrappedLines.size() * lineHeight) / 2;
 
+    // Draw everything to framebuffer first
+    drawTarget->fillScreen(TFT_BLACK); // Clear screen
     // Draw each wrapped line
     for (size_t i = 0; i < finalWrappedLines.size(); i++) {
-        tft.drawString(finalWrappedLines[i], tft.width() / 2, startY + (i * lineHeight), font);
+        drawTarget->drawString(finalWrappedLines[i], screenWidth / 2, startY + (i * lineHeight), font);
     }
+
+    // Push entire framebuffer to display in one atomic operation
+    pushFramebuffer();
 }
 
 void displayShowAPScreen(const char* ssid, const char* password, const char* ip) {
