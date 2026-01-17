@@ -449,9 +449,12 @@ void displayRenderImage(const char *path) {
     }
     logPrint(String(F("INFO: Image file opened: ")) + path);
 
-    tft.fillScreen(TFT_BLACK);
-
+    // Direct image swap without clearing screen for smooth transitions
+    // The new JPEG will overwrite the previous image directly
+    // Keep CS low during entire transfer to reduce overhead and speed up rendering
+    tft.startWrite();
     JRESULT res = TJpgDec.drawFsJpg(0, 0, jpgFile);
+    tft.endWrite();
     if (res != JDR_OK) {
         String errorMsg = String(F("JPEG Decode Failed\nCode: ")) + String(res);
         displayShowMessage(errorMsg);
@@ -510,4 +513,49 @@ void displayShowAPScreen(const char* ssid, const char* password, const char* ip)
     strncpy(displayState.ipInfo, ip, sizeof(displayState.ipInfo));
     displayState.ipInfo[sizeof(displayState.ipInfo) - 1] = '\0'; // Ensure null-termination
     displayUpdate();
+}
+
+void displayCycleNextPage() {
+    // Don't cycle pages if in AP mode
+    if (displayState.apMode) {
+        logPrint(F("Page cycling disabled in AP mode"));
+        return;
+    }
+
+    // Cycle: Clock -> Image (if available) -> Clock
+    if (!displayState.showImage) {
+        // Currently showing clock, try to switch to image if available
+        if (displayState.imagePath[0] != '\0' && LittleFS.exists(displayState.imagePath)) {
+            logPrint(F("Cycling to image page"));
+            displayState.showImage = true;
+        } else {
+            logPrint(F("No image available, staying on clock page"));
+        }
+    } else {
+        // Currently showing image, switch back to clock
+        logPrint(F("Cycling to clock page"));
+        displayState.showImage = false;
+    }
+
+    // Immediately update the display
+    displayUpdate();
+}
+
+// Track backlight state for toggle functionality
+static int savedBrightness = 100;
+static bool backlightOn = true;
+
+void displayToggleBacklight() {
+    if (backlightOn) {
+        // Turn off backlight
+        logPrint(F("Backlight OFF"));
+        savedBrightness = 100; // Assume current brightness is 100 (could be read from settings)
+        displaySetBrightness(0);
+        backlightOn = false;
+    } else {
+        // Turn on backlight
+        logPrintf("Backlight ON (brightness: %d)", savedBrightness);
+        displaySetBrightness(savedBrightness);
+        backlightOn = true;
+    }
 }

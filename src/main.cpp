@@ -11,6 +11,7 @@
 #include "webserver.h"
 #include "settings.h"
 #include "logger.h"
+#include "button.h"
 
 // NTP server (for NTPClient)
 #define NTP_SERVER "pool.ntp.org"
@@ -62,7 +63,18 @@ bool tryConnectWiFi(int maxAttempts) {
             yield();
         }
 
+                // Wait for IP address to be assigned after WiFi connection
                 if (WiFi.status() == WL_CONNECTED) {
+                    Serial.println(F("WiFi associated, waiting for IP..."));
+                    unsigned long ipWaitStart = millis();
+                    while (WiFi.localIP() == IPAddress(0,0,0,0) &&
+                           millis() - ipWaitStart < 10000) { // Wait up to 10 seconds for IP
+                        delay(100);
+                        yield();
+                    }
+                }
+
+                if (WiFi.status() == WL_CONNECTED && WiFi.localIP() != IPAddress(0,0,0,0)) {
 
                     Serial.println(F("WiFi connected!"));
 
@@ -582,7 +594,7 @@ void setup() {
 
     displaySetBrightness(100);  // Full brightness for testing
 
-
+    buttonInit();  // Initialize GPIO button
 
     displayShowMessage(F("SmartClock\nInitializing..."));
 
@@ -755,6 +767,14 @@ void loop() {
     // Monitor WiFi connection and handle failsafe mode
 
     monitorWiFi();
+
+    // Handle button presses
+    ButtonPress buttonPress = buttonUpdate();
+    if (buttonPress == BUTTON_SHORT) {
+        displayCycleNextPage();
+    } else if (buttonPress == BUTTON_LONG) {
+        displayToggleBacklight();
+    }
 
     // Only handle OTA and mDNS if not in failsafe mode
     if (!wifiFailsafeMode) {

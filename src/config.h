@@ -3,6 +3,7 @@
 
 // Pin definitions
 #define PIN_BACKLIGHT 5
+#define PIN_BUTTON 4
 
 // Display settings
 #define DISPLAY_WIDTH 240
@@ -31,6 +32,11 @@
 // Update intervals
 #define SCROLL_INTERVAL 30
 #define DISPLAY_UPDATE_INTERVAL 1000
+
+// Button settings
+#define BUTTON_DEBOUNCE_MS 50
+#define BUTTON_SHORT_PRESS_MAX_MS 800
+#define BUTTON_LONG_PRESS_MIN_MS 2000
 
 // Filesystem
 #define IMAGE_DIR "/image/"
