@@ -592,7 +592,7 @@ void setup() {
 
     displayInit();
 
-    displaySetBrightness(100);  // Full brightness for testing
+    displaySetBrightness(appSettings.brightness);  // Restore saved brightness
 
     buttonInit();  // Initialize GPIO button
 
@@ -666,7 +666,7 @@ void setup() {
 
 
 
-        currentBrightness = 100;  // Keep full brightness
+        currentBrightness = appSettings.brightness;  // Restore saved brightness
 
 
 
