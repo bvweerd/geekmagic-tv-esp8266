@@ -1,0 +1,43 @@
+name: CI
+
+on:
+  push:
+    branches: ["dev", "feature/**", "fix/**", "hotfix/**"]
+    tags-ignore: ["**"]
+  pull_request:
+    branches: [dev, main]
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    name: PlatformIO build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.x"
+          cache: pip
+
+      - name: Install PlatformIO
+        run: pip install platformio
+
+      - name: Cache PlatformIO
+        uses: actions/cache@v4
+        with:
+          path: ~/.platformio
+          key: platformio-${{ hashFiles('platformio.ini') }}
+
+      - name: Build firmware
+        run: pio run -e nodemcuv2
+
+      - name: Upload firmware artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: firmware-dev-${{ github.sha }}
+          path: .pio/build/nodemcuv2/firmware.bin
+          retention-days: 7

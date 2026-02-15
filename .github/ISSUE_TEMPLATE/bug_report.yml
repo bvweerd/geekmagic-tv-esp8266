@@ -1,0 +1,68 @@
+name: Bug Report
+description: Meld een bug of onverwacht gedrag
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Bedankt voor het melden van een bug! Vul het formulier zo volledig mogelijk in.
+
+  - type: input
+    id: version
+    attributes:
+      label: Versie
+      description: Welke versie gebruik je?
+      placeholder: "bijv. 1.2.3"
+    validations:
+      required: true
+
+  - type: input
+    id: ha_version
+    attributes:
+      label: Home Assistant versie (indien van toepassing)
+      placeholder: "bijv. 2025.2.0"
+
+  - type: textarea
+    id: description
+    attributes:
+      label: Beschrijving van de bug
+      description: Wat gaat er mis? Wees zo specifiek mogelijk.
+    validations:
+      required: true
+
+  - type: textarea
+    id: steps
+    attributes:
+      label: Stappen om te reproduceren
+      description: Hoe kunnen we dit reproduceren?
+      placeholder: |
+        1. Ga naar ...
+        2. Klik op ...
+        3. Zie foutmelding
+    validations:
+      required: true
+
+  - type: textarea
+    id: expected
+    attributes:
+      label: Verwacht gedrag
+      description: Wat zou er moeten gebeuren?
+    validations:
+      required: true
+
+  - type: textarea
+    id: logs
+    attributes:
+      label: Logs / Foutmeldingen
+      description: Plak hier relevante logs of foutmeldingen (Home Assistant logboek, browser console, etc.)
+      render: text
+
+  - type: checkboxes
+    id: checklist
+    attributes:
+      label: Checklist
+      options:
+        - label: Ik heb bestaande issues doorzocht en dit is geen duplicaat
+          required: true
+        - label: Ik gebruik de laatste versie
+          required: false

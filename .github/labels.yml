@@ -1,0 +1,52 @@
+# GitHub Labels — gesynchroniseerd via sync-labels.yml workflow
+- name: bug
+  color: "d73a4a"
+  description: "Iets werkt niet zoals verwacht"
+
+- name: enhancement
+  color: "a2eeef"
+  description: "Nieuwe feature of verbetering"
+
+- name: question
+  color: "d876e3"
+  description: "Meer informatie nodig"
+
+- name: documentation
+  color: "0075ca"
+  description: "Verbetering of aanvulling op documentatie"
+
+- name: configuration
+  color: "e4e669"
+  description: "Configuratie of setup gerelateerd"
+
+- name: performance
+  color: "f9d0c4"
+  description: "Performance of resource gebruik"
+
+- name: dependencies
+  color: "0366d6"
+  description: "Afhankelijkheden bijwerken"
+
+- name: duplicate
+  color: "cfd3d7"
+  description: "Dit issue bestaat al"
+
+- name: wontfix
+  color: "ffffff"
+  description: "Wordt niet opgelost"
+
+- name: "good first issue"
+  color: "7057ff"
+  description: "Goed voor nieuwe bijdragers"
+
+- name: "help wanted"
+  color: "008672"
+  description: "Extra aandacht of hulp gewenst"
+
+- name: stale
+  color: "ededed"
+  description: "Geen recente activiteit"
+
+- name: "breaking change"
+  color: "e11d48"
+  description: "Bevat een breaking change"
