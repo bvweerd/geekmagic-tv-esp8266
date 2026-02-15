@@ -1,60 +1,60 @@
 name: Bug Report
-description: Meld een bug of onverwacht gedrag
+description: Report a bug or unexpected behavior
 labels: ["bug"]
 body:
   - type: markdown
     attributes:
       value: |
-        Bedankt voor het melden van een bug! Vul het formulier zo volledig mogelijk in.
+        Thanks for reporting a bug! Please fill in the form as completely as possible.
 
   - type: input
     id: version
     attributes:
-      label: Versie
-      description: Welke versie gebruik je?
-      placeholder: "bijv. 1.2.3"
+      label: Version
+      description: Which version are you using?
+      placeholder: "e.g. 1.2.3"
     validations:
       required: true
 
   - type: input
     id: ha_version
     attributes:
-      label: Home Assistant versie (indien van toepassing)
-      placeholder: "bijv. 2025.2.0"
+      label: Home Assistant version (if applicable)
+      placeholder: "e.g. 2025.2.0"
 
   - type: textarea
     id: description
     attributes:
-      label: Beschrijving van de bug
-      description: Wat gaat er mis? Wees zo specifiek mogelijk.
+      label: Bug description
+      description: What goes wrong? Be as specific as possible.
     validations:
       required: true
 
   - type: textarea
     id: steps
     attributes:
-      label: Stappen om te reproduceren
-      description: Hoe kunnen we dit reproduceren?
+      label: Steps to reproduce
+      description: How can we reproduce this?
       placeholder: |
-        1. Ga naar ...
-        2. Klik op ...
-        3. Zie foutmelding
+        1. Go to ...
+        2. Click on ...
+        3. See error
     validations:
       required: true
 
   - type: textarea
     id: expected
     attributes:
-      label: Verwacht gedrag
-      description: Wat zou er moeten gebeuren?
+      label: Expected behavior
+      description: What should happen instead?
     validations:
       required: true
 
   - type: textarea
     id: logs
     attributes:
-      label: Logs / Foutmeldingen
-      description: Plak hier relevante logs of foutmeldingen (Home Assistant logboek, browser console, etc.)
+      label: Logs / Error messages
+      description: Paste relevant logs or error messages (Home Assistant log, browser console, etc.)
       render: text
 
   - type: checkboxes
@@ -62,7 +62,7 @@ body:
     attributes:
       label: Checklist
       options:
-        - label: Ik heb bestaande issues doorzocht en dit is geen duplicaat
+        - label: I have searched existing issues and this is not a duplicate
           required: true
-        - label: Ik gebruik de laatste versie
+        - label: I am using the latest version
           required: false

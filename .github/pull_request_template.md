@@ -1,22 +1,22 @@
-## Beschrijving
+## Description
 
-<!-- Beschrijf kort wat deze PR doet en waarom -->
+<!-- Briefly describe what this PR does and why -->
 
-## Type wijziging
+## Type of change
 
-- [ ] `fix:` Bug fix (patch versie bump)
-- [ ] `feat:` Nieuwe feature (minor versie bump)
-- [ ] `feat!:` / `BREAKING CHANGE:` Breaking change (major versie bump)
-- [ ] `chore:` / `docs:` / `ci:` Onderhoud of documentatie (geen versie bump)
+- [ ] `fix:` Bug fix (patch version bump)
+- [ ] `feat:` New feature (minor version bump)
+- [ ] `feat!:` / `BREAKING CHANGE:` Breaking change (major version bump)
+- [ ] `chore:` / `docs:` / `ci:` Maintenance or documentation (no version bump)
 
 ## Checklist
 
-- [ ] Commit title volgt [Conventional Commits](https://www.conventionalcommits.org/) (`feat:`, `fix:`, `chore:`, etc.)
-- [ ] Tests toegevoegd of bijgewerkt waar van toepassing
-- [ ] Documentatie bijgewerkt indien nodig
-- [ ] CI is groen
-- [ ] PR is gericht op de `dev` branch (niet `main`, tenzij hotfix)
+- [ ] Commit title follows [Conventional Commits](https://www.conventionalcommits.org/) (`feat:`, `fix:`, `chore:`, etc.)
+- [ ] Tests added or updated where applicable
+- [ ] Documentation updated if needed
+- [ ] CI is green
+- [ ] PR targets the `dev` branch (not `main`, unless this is a hotfix)
 
-## Screenshots / Logs (optioneel)
+## Screenshots / Logs (optional)
 
-<!-- Voeg relevante screenshots of logs toe -->
+<!-- Add relevant screenshots or log output -->

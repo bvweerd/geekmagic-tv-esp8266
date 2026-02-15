@@ -1,45 +1,45 @@
 name: Feature Request
-description: Stel een nieuwe feature of verbetering voor
+description: Suggest a new feature or improvement
 labels: ["enhancement"]
 body:
   - type: markdown
     attributes:
       value: |
-        Bedankt voor je suggestie! Beschrijf zo duidelijk mogelijk wat je wilt.
+        Thanks for your suggestion! Please describe your request as clearly as possible.
 
   - type: textarea
     id: problem
     attributes:
-      label: Welk probleem lost dit op?
-      description: Beschrijf het probleem of de behoefte die aanleiding geeft tot dit verzoek.
-      placeholder: "Als gebruiker wil ik ... zodat ..."
+      label: What problem does this solve?
+      description: Describe the problem or need that motivates this request.
+      placeholder: "As a user I want to ... so that ..."
     validations:
       required: true
 
   - type: textarea
     id: solution
     attributes:
-      label: Voorgestelde oplossing
-      description: Hoe zou jij dit implementeren?
+      label: Proposed solution
+      description: How would you implement this?
     validations:
       required: true
 
   - type: textarea
     id: alternatives
     attributes:
-      label: Overwogen alternatieven
-      description: Heb je andere oplossingen overwogen?
+      label: Alternatives considered
+      description: Have you considered other solutions?
 
   - type: textarea
     id: context
     attributes:
-      label: Extra context
-      description: Voeg eventuele extra context, screenshots of voorbeelden toe.
+      label: Additional context
+      description: Add any other context, screenshots, or examples.
 
   - type: checkboxes
     id: checklist
     attributes:
       label: Checklist
       options:
-        - label: Ik heb bestaande issues doorzocht en dit is geen duplicaat
+        - label: I have searched existing issues and this is not a duplicate
           required: true
