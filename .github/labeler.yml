@@ -1,17 +1,17 @@
 bug:
-  - '(?i)(bug|crash|reboot|restart|freeze|not working|does not work|kapot|broken|display blank|screen blank|stuck|hangs)'
+  - '(?i)(bug|crash|reboot|restart|freeze|not working|does not work|broken|display blank|screen blank|stuck|hangs)'
 
 enhancement:
-  - '(?i)(feature|support|add|request|wish|improvement|verbeter|suggestie)'
+  - '(?i)(feature|support|add|request|wish|improvement|suggestion)'
 
 question:
-  - '(?i)(question|vraag|how to|hoe|what is|help|explain|why|confused)'
+  - '(?i)(question|how to|what is|help|explain|why|confused)'
 
 wifi:
   - '(?i)(wifi|wi-fi|network|connect|ssid|ap mode|captive portal|connection|disconnects|no wifi)'
 
 display:
-  - '(?i)(display|screen|scherm|pixel|brightness|dimm|font|icon|color|colour|refresh|flicker|blank)'
+  - '(?i)(display|screen|pixel|brightness|dimm|font|icon|color|colour|refresh|flicker|blank)'
 
 ota:
   - '(?i)(ota|update|firmware|flash|upgrade|binary|bin file)'
