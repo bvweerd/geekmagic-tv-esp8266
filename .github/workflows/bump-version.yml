@@ -4,7 +4,7 @@ on:
   workflow_dispatch:
     inputs:
       bump:
-        description: "Type versie bump"
+        description: "Version bump type"
         type: choice
         options: [patch, minor, major]
         default: patch
@@ -47,4 +47,4 @@ jobs:
       - name: Show new version
         run: |
           NEW_TAG=$(git describe --tags --abbrev=0)
-          echo "### Versie gebumpt naar $NEW_TAG" >> $GITHUB_STEP_SUMMARY
+          echo "### Version bumped to $NEW_TAG" >> $GITHUB_STEP_SUMMARY
