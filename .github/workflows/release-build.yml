@@ -6,7 +6,7 @@ permissions:
 on:
   push:
     tags:
-      - 'v*'
+      - 'v*.*.*'
 
 jobs:
   build:
@@ -49,6 +49,34 @@ jobs:
           cp .pio/build/nodemcuv2/firmware.bin smartclock-${{ steps.get_version.outputs.TAG }}.bin
           ls -lh smartclock-${{ steps.get_version.outputs.TAG }}.bin
 
+      - name: Generate changelog
+        id: changelog
+        uses: mikepenz/release-changelog-builder-action@v6
+        with:
+          commitMode: true
+          configuration: |
+            {
+              "label_extractor": [
+                { "pattern": "^(feat|feature|add)(\\(.+\\))?!?[:\\s]", "target": "feature" },
+                { "pattern": "^(fix|bug|bugfix|hotfix)(\\(.+\\))?!?[:\\s]", "target": "bug" },
+                { "pattern": "^(docs?|documentation)(\\(.+\\))?[:\\s]", "target": "documentation" },
+                { "pattern": "^(ci|github.?actions?)(\\(.+\\))?[:\\s]", "target": "ci" },
+                { "pattern": "^(chore|refactor|test|perf|style|build|bump)(\\(.+\\))?[:\\s]", "target": "chore" }
+              ],
+              "categories": [
+                { "title": "## ✨ New features",   "labels": ["feature", "enhancement"] },
+                { "title": "## 🐛 Bug fixes",      "labels": ["bug", "fix"] },
+                { "title": "## 📚 Documentation",  "labels": ["documentation"] },
+                { "title": "## 🔧 Other",          "labels": ["chore"] },
+                { "title": "## 👷 CI",             "labels": ["ci"] },
+                { "title": "## 📦 Uncategorized",  "labels": [] }
+              ],
+              "ignore_labels": ["dependabot"],
+              "template": "#{{CHANGELOG}}\n\n**Full changelog**: #{{RELEASE_DIFF}}"
+            }
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
       - name: Create Release
         uses: softprops/action-gh-release@v3
         with:
@@ -56,20 +84,18 @@ jobs:
           tag_name: ${{ steps.get_version.outputs.TAG }}
           name: SmartClock Firmware ${{ steps.get_version.outputs.TAG }}
           body: |
-            ## SmartClock Firmware Release ${{ steps.get_version.outputs.TAG }}
+            ${{ steps.changelog.outputs.changelog }}
 
-            ### Installation
+            ---
+
+            ## Installation
             1. Download the `smartclock-${{ steps.get_version.outputs.TAG }}.bin` file
             2. Go to your SmartClock web interface
             3. Navigate to "Advanced Actions" → "Firmware Update (OTA)"
             4. Upload the downloaded binary file
             5. Wait for the update to complete and the device to restart
-
-            ### What's Changed
-            - Firmware version: ${{ steps.get_version.outputs.VERSION }}
-
-            **Full Changelog**: https://github.com/${{ github.repository }}/commits/${{ steps.get_version.outputs.TAG }}
           draft: false
           prerelease: false
+          generate_release_notes: false
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
