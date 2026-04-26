@@ -18,15 +18,15 @@ jobs:
     name: Bump ${{ inputs.bump }} version
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
         with:
           ref: main
           fetch-depth: 0
           token: ${{ secrets.GITHUB_TOKEN }}
 
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v6
         with:
-          python-version: "3.x"
+          python-version: "3.13"
 
       - name: Install bump-my-version
         run: pip install bump-my-version

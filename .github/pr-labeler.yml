@@ -1,0 +1,21 @@
+bug:
+  - changed-files:
+    - any-glob-to-any-file: []  # no file-based bug detection; use issue labels or manual
+
+enhancement:
+  - changed-files:
+    - any-glob-to-any-file:
+      - src/**
+      - lib/**
+
+documentation:
+  - changed-files:
+    - any-glob-to-any-file:
+      - "*.md"
+      - docs/**
+
+dependencies:
+  - changed-files:
+    - any-glob-to-any-file:
+      - platformio.ini
+      - src/settings.h
